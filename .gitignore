@@ -1,0 +1,40 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+*.tsbuildinfo
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Generated databases (ElizaOS runtime)
+.eliza/
+.eliza-db/
+p3-db-*/
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Claude / local tooling
+.claude/
+
+# Local-only project work (not part of the agent-framework repo)
+diagram/
+checkpoint_snapshots/
+phase0/
