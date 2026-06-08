@@ -1,0 +1,23 @@
+{
+  "name": "@sui-walrus/demo",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Standalone terminal demo: ElizaOS runtime + local chat memory + wallet-free Walrus HTTP client.",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "smoke": "tsx src/smoke.ts",
+    "smoke:agent": "tsx src/smokeAgent.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@elizaos/core": "^1.7.2",
+    "@elizaos/plugin-groq": "^1.0.4",
+    "@elizaos/plugin-sql": "^1.7.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}
