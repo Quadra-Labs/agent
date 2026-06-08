@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    // Clear the base config's emit-oriented rootDir ("src"): this config is
+    // noEmit and also includes "test", so a rootDir of "src" would (correctly)
+    // reject the test files. rootDir is meaningless without emit.
+    "rootDir": "."
+  },
+  "include": ["src", "test"]
+}
