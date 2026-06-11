@@ -31,13 +31,16 @@ import sqlPlugin, { createDatabaseAdapter } from "@elizaos/plugin-sql";
 import { walrusPluginWithSigner } from "./walrusPluginWithSigner.js";
 import { memwalPlugin } from "../../../plugins/plugin-memwal/src/index.js";
 import type { AgentConfig } from "./config.js";
+import { DEFAULT_CHARACTER, type AgentCharacter } from "./character.js";
 
 // Fixed embedding width. 384 matches plugin-sql's smallest supported vector dim
 // (VECTOR_DIMS.SMALL -> dim384), so a stored vector lands in a real column.
 const EMBEDDING_DIM = 384;
 
-// Stable agent identity. Deterministic so the same DB is reused across boots.
-export const AGENT_NAME = "WalrusAgent";
+// Stable agent identity for callers that do not pass a custom character (every
+// proof). Derived from DEFAULT_CHARACTER so the default name/bio is single-sourced.
+// Deterministic so the same DB is reused across boots.
+export const AGENT_NAME = DEFAULT_CHARACTER.name;
 
 export interface AgentRuntimeHandle {
   readonly runtime: IAgentRuntime;
@@ -131,8 +134,14 @@ function extractEmbeddingText(params: unknown): string {
  * STRING under WALRUS_SIGNER_KEY and is normalized inside the Walrus service; it
  * is OPTIONAL (absent -> read-only Walrus) and is NEVER logged.
  */
-export async function createAgentRuntime(config: AgentConfig): Promise<AgentRuntimeHandle> {
-  const agentId = stringToUuid(AGENT_NAME);
+export async function createAgentRuntime(
+  config: AgentConfig,
+  character: AgentCharacter = DEFAULT_CHARACTER,
+): Promise<AgentRuntimeHandle> {
+  // The agent identity (and the DB partition) keys off the character name. The
+  // default character reproduces AGENT_NAME, so one-arg callers are unchanged; a
+  // custom character boots a DISTINCT identity (and resolves its own checkpoints).
+  const agentId = stringToUuid(character.name);
 
   // Only set WALRUS_SIGNER_KEY in settings when present, so its absence is a clean
   // "undefined" the service treats as read-only. The secret is never logged.
@@ -145,9 +154,9 @@ export async function createAgentRuntime(config: AgentConfig): Promise<AgentRunt
       : {}),
   };
 
-  const character = {
-    name: AGENT_NAME,
-    bio: ["An agent backed by local chat memory (SQLite) and Walrus-backed checkpoints."],
+  const elizaCharacter = {
+    name: character.name,
+    bio: [...character.bio],
     plugins: [
       "@elizaos/plugin-sql",
       "@elizaos/plugin-groq",
@@ -163,7 +172,7 @@ export async function createAgentRuntime(config: AgentConfig): Promise<AgentRunt
   };
 
   const runtime = new AgentRuntime({
-    character,
+    character: elizaCharacter,
     agentId,
     // Plugin objects passed directly (no registry resolution). SQL first; Walrus
     // before MemWal so MemwalService can resolve the live WalrusService.

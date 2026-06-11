@@ -127,6 +127,13 @@ export interface RespondInput {
    */
   readonly templatesText?: string;
   /**
+   * OPTIONAL system-prompt override (the interactive CLI passes a character's
+   * systemPrompt here). ABSENT -> the built-in SYSTEM_PROMPT is used, so the prompt
+   * is byte-identical to prior behavior. Only the leading behavioral line changes;
+   * the template/recall/history sections are unaffected.
+   */
+  readonly systemPrompt?: string;
+  /**
    * Optional hook to OBSERVE the exact flattened prompt sent to the model, before
    * the model call. Used by the proof to assert the recent-history window contains
    * the prior turn. Does not affect behavior.
@@ -214,9 +221,14 @@ export function buildChatPrompt(
   history: readonly ChatTurn[],
   resumedSummary?: string,
   templatesText?: string,
+  systemPrompt?: string,
 ): string {
+  const lead =
+    systemPrompt !== undefined && systemPrompt.trim().length > 0
+      ? systemPrompt.trim()
+      : SYSTEM_PROMPT;
   return [
-    SYSTEM_PROMPT,
+    lead,
     "",
     ...renderTemplates(templatesText),
     ...renderResumedContext(resumedSummary),
@@ -240,7 +252,12 @@ export async function respond(
   await saveTurn(runtime, { roomId: input.roomId, role: "user", text: input.text });
 
   const history = await listTurns(runtime, input.roomId);
-  const prompt = buildChatPrompt(history, input.resumedSummary, input.templatesText);
+  const prompt = buildChatPrompt(
+    history,
+    input.resumedSummary,
+    input.templatesText,
+    input.systemPrompt,
+  );
   input.onPrompt?.(prompt);
 
   const raw = await runtime.useModel(ModelType.TEXT_LARGE, { prompt });

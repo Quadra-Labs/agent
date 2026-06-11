@@ -24,6 +24,19 @@ const DEFAULT_SMALL_MODEL = "llama-3.1-8b-instant";
 const DEFAULT_WALRUS_NETWORK = "testnet";
 const DEFAULT_WALRUS_EPOCHS = "3";
 
+// Open-mode testnet Seal key servers, read on-chain in the P0c spike (NOT assumed).
+// Used to encrypt the job result under the quadra::job_access policy. Both run in
+// Open mode, so basic testnet encryption needs no API key (see phase0/spike/P0c-seal.md).
+const DEFAULT_SEAL_KEY_SERVER_IDS = [
+  "0xb012378c9f3799fb5b1a7083da74a4069e3c3f1c93de0b27212a5799ce1e1e98",
+  "0x73d05d62c18d9374e3ea529e8e0ed6161da1a141a94d3f76ae3fe4e99356db75",
+];
+
+// Seal threshold: how many of the configured key servers must return a key share.
+// With two open-mode servers, a threshold of 1 keeps encryption/decryption working if
+// either server is reachable (the spike's resilience choice). Overridable via env.
+const DEFAULT_SEAL_THRESHOLD = 1;
+
 // Default session-length checkpoint gate (A3 Task 4). Once a session reaches this
 // many turns, the session-lifecycle caller rolls it into a checkpoint (NOT a
 // per-message evaluator — that would store a blob per turn and burn gas). A modest
@@ -56,6 +69,19 @@ export interface AgentConfig {
    * non-positive / unparseable override falls back to the default).
    */
   readonly sessionTurnLimit: number;
+  /**
+   * OPTIONAL deployed `quadra` package id (0x...), the Seal `packageId` namespace
+   * the job result is encrypted under. Absent -> the job-result Seal write is
+   * skipped (the agent still constructs the Intake notification). This is the gate
+   * between "encrypt+store proven" and "decrypt-through-policy live": until the real
+   * deployed package id (and matching on-chain job_ids) are set, encryption runs but
+   * the resulting ciphertext cannot be decrypted through the live seal_approve.
+   */
+  readonly sealPackageId: string | undefined;
+  /** Seal key server object ids (open-mode testnet). Defaults to the P0c spike pair. */
+  readonly sealKeyServerIds: readonly string[];
+  /** Seal TSS threshold (how many key servers must return a key share). */
+  readonly sealThreshold: number;
 }
 
 // Parse a positive-integer setting, falling back to `fallback` for a missing,
@@ -77,6 +103,22 @@ function readTrimmed(env: NodeJS.ProcessEnv, key: string): string | undefined {
   if (raw === undefined) return undefined;
   const trimmed = raw.trim();
   return trimmed.length > 0 ? trimmed : undefined;
+}
+
+// Parse a comma-separated setting into a trimmed, non-empty string list, falling back
+// to `fallback` when the setting is absent or yields no non-empty entries.
+function readCsv(
+  env: NodeJS.ProcessEnv,
+  key: string,
+  fallback: readonly string[],
+): readonly string[] {
+  const raw = readTrimmed(env, key);
+  if (raw === undefined) return fallback;
+  const items = raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  return items.length > 0 ? items : fallback;
 }
 
 /**
@@ -109,5 +151,8 @@ export function loadAgentConfig(env: NodeJS.ProcessEnv = process.env): AgentConf
       "MEMWAL_SESSION_TURN_LIMIT",
       DEFAULT_SESSION_TURN_LIMIT,
     ),
+    sealPackageId: readTrimmed(env, "SEAL_PACKAGE_ID"),
+    sealKeyServerIds: readCsv(env, "SEAL_KEY_SERVER_IDS", DEFAULT_SEAL_KEY_SERVER_IDS),
+    sealThreshold: readPositiveInt(env, "SEAL_THRESHOLD", DEFAULT_SEAL_THRESHOLD),
   };
 }

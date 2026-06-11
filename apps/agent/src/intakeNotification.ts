@@ -24,6 +24,8 @@ import type { IAgentRuntime } from "@elizaos/core";
 import { flattenTranscript } from "./closeSession.js";
 import type { ChatTurn } from "./chatMemory.js";
 import type { JobTemplate } from "./templates.js";
+import { storeJobResult } from "./jobResult.js";
+import type { StoreJobResultResult } from "./jobResult.js";
 
 // plugin-groq swallows API errors and returns this sentinel instead of throwing.
 // Treat it as a hard extraction failure so we never build a notification from a fake
@@ -141,6 +143,24 @@ export function parseExtractedParams(raw: string): Record<string, string> {
   return Object.fromEntries(entries);
 }
 
+/**
+ * OPTIONAL config that turns on the "job is done -> write the result to Seal" path. When
+ * present, completeIntake produces the real result, encrypts it under the job's id, and
+ * stores the ciphertext on Walrus (see jobResult.ts). When ABSENT, completeIntake behaves
+ * exactly as in A4 (construct + log the notification only) — the Seal write is strictly
+ * additive and opt-in so the A4 gate stays byte-identical.
+ */
+export interface SealWriteConfig {
+  /** Deployed quadra package id (config.sealPackageId). Absent here disables the write. */
+  readonly packageId: string | undefined;
+  /** Open-mode key server object ids (config.sealKeyServerIds). */
+  readonly keyServerIds: readonly string[];
+  /** TSS threshold (config.sealThreshold). */
+  readonly threshold: number;
+  /** Sui network for the read-only client SealClient needs. */
+  readonly network: "testnet" | "mainnet" | "devnet" | "localnet";
+}
+
 export interface CompleteIntakeInput {
   /** The matched template the job conforms to. */
   readonly template: JobTemplate;
@@ -152,6 +172,13 @@ export interface CompleteIntakeInput {
   readonly agentId: string;
   /** OPTIONAL deterministic id suffix for the job_id stub (test injection). */
   readonly idSuffix?: string;
+  /**
+   * OPTIONAL. When set, the result is produced, Seal-encrypted under the constructed
+   * job_id, and stored on Walrus after the notification is built. Absent -> no Seal
+   * write (A4 behavior). The Seal identity binds to the SAME job_id the notification
+   * carries, so the write is governed by quadra::job_access for that exact job.
+   */
+  readonly sealWrite?: SealWriteConfig;
 }
 
 export interface CompleteIntakeResult {
@@ -159,6 +186,14 @@ export interface CompleteIntakeResult {
   readonly notification: IntakeNotification;
   /** The collected parameter values extracted from the transcript (best-effort). */
   readonly collected: Record<string, string>;
+  /**
+   * The outcome of the "write the result to Seal" step, or undefined when no sealWrite
+   * config was supplied. A typed ok/kind union (never a throw): on success it carries the
+   * durable blobId and the sealId the result was encrypted under; on failure, the typed
+   * reason. The caller decides how to surface a failed result-write — the notification
+   * itself is unaffected.
+   */
+  readonly resultWrite?: StoreJobResultResult;
 }
 
 /**
@@ -198,5 +233,33 @@ export async function completeIntake(
   // the framework deliberately stops here. The notification carries no secret.
   console.log(`Intake notification constructed (NOT signed/sent): ${JSON.stringify(notification)}`);
 
-  return { notification, collected };
+  // The job is done -> write the result to Seal, if (and only if) sealWrite is supplied.
+  // The Seal identity binds to the SAME job_id the notification carries, so the
+  // ciphertext is governed by quadra::job_access for this exact job. The result bytes
+  // are NEVER logged here; we log only the typed outcome (blob id / failure kind).
+  let resultWrite: StoreJobResultResult | undefined;
+  if (input.sealWrite !== undefined) {
+    resultWrite = await storeJobResult(runtime, {
+      jobId: notification.job_id,
+      template: input.template,
+      collected,
+      packageId: input.sealWrite.packageId,
+      keyServerIds: input.sealWrite.keyServerIds,
+      threshold: input.sealWrite.threshold,
+      network: input.sealWrite.network,
+    });
+    if (resultWrite.ok) {
+      console.log(
+        `Job result encrypted to Seal and stored on Walrus: blob ${resultWrite.blobId} ` +
+          `(sealed under job_id ${notification.job_id}).`,
+      );
+    } else {
+      console.warn(
+        `Job result NOT written to Seal (${resultWrite.kind}): ${resultWrite.message}. ` +
+          "The Intake notification is unaffected.",
+      );
+    }
+  }
+
+  return { notification, collected, resultWrite };
 }
