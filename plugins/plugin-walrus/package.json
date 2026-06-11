@@ -17,6 +17,7 @@
     "typecheck": "tsc --noEmit",
     "test": "tsx --test test/**/*.test.ts"
   },
+  "//tests": "Unit tests were moved to ../../proofs/plugins/plugin-walrus (archived, source-only plugins/). To run them, move the *.ts files back into test/ here; the test script above expects test/.",
   "dependencies": {
     "@elizaos/core": "^1.7.2",
     "@mysten/sui": "^2.17.0",
