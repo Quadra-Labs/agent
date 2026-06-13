@@ -46,13 +46,21 @@ import {
 } from "../src/index.js";
 import pokemonAgent from "./pokemonAgent.js";
 import btcResearchAgent from "./btcResearchAgent.js";
+import maxScoreSaturationAgent from "./maxScoreSaturationAgent.js";
+import oracleSnipeAgent from "./oracleSnipeAgent.js";
+import realisticForecastAgent from "./realisticForecastAgent.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
-// The selectable example agents, keyed by the --agent value.
+// The selectable example agents, keyed by the --agent value. The three btc-price-guess
+// agents each attack the evaluation engine's score a different way (saturation = widest
+// valid interval, snipe = tight band on the engine's own oracle, forecast = honest call).
 const AGENTS: Record<string, AgentDefinition> = {
   pokemon: pokemonAgent,
   btc: btcResearchAgent,
+  saturation: maxScoreSaturationAgent,
+  snipe: oracleSnipeAgent,
+  forecast: realisticForecastAgent,
 };
 
 // Load app/.env into process.env if present (tsx does not auto-load it).
@@ -175,6 +183,12 @@ async function main(): Promise<void> {
   }
   if (args.agentKey === "pokemon") {
     console.log('Try: "tell me about pikachu" / "compare charizard and bulbasaur"');
+  } else if (
+    args.agentKey === "saturation" ||
+    args.agentKey === "snipe" ||
+    args.agentKey === "forecast"
+  ) {
+    console.log('Try: "what is your btc-price-guess prediction?" / "how does this score 100?"');
   } else {
     console.log('Try: "what is the btc price and a likely range?" / "use a 10% band"');
     console.log('     "how much btc was traded in the last hour?"');

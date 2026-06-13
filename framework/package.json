@@ -8,7 +8,10 @@
     "typecheck": "tsc --noEmit",
     "chat:example": "tsx examples/chat.ts",
     "chat:pokemon": "tsx examples/chat.ts --agent pokemon",
-    "chat:btc": "tsx examples/chat.ts --agent btc"
+    "chat:btc": "tsx examples/chat.ts --agent btc",
+    "chat:saturation": "tsx examples/chat.ts --agent saturation",
+    "chat:snipe": "tsx examples/chat.ts --agent snipe",
+    "chat:forecast": "tsx examples/chat.ts --agent forecast"
   },
   "dependencies": {
     "@elizaos/core": "^1.7.2",
