@@ -1,21 +1,9 @@
-// memwalService.ts — long-lived MemWal checkpoint service (A1, Task 2).
-//
-// Round-trips a Checkpoint through Walrus, applying a pluggable encrypt/decrypt
-// seam. MemWal COMPOSES Walrus (dependency direction MemWal -> Walrus, NEVER the
-// reverse): the long-lived WalrusService is resolved via
-// runtime.getService(WalrusService.serviceType); this service never constructs a
-// Walrus client and never re-instantiates one per call. No index / SQLite here
-// (that is Task 3); this service holds only the seam + the Walrus dependency.
-//
-// The seam (MemwalSeam) is plain bytes-in / bytes-out hooks. EMPTY seam (both
-// hooks undefined) is the valid default (plain / demo mode); a present pair is
-// prod mode. Whatever supplies the pair (A2, Seal) owns that concern — MemWal
-// stays Seal-agnostic and only ever sees bytes.
-//
-// Lifts the malformed-blob guards from demo/src/memwal.ts readCheckpoint and
-// EXTENDS them to also require the index-key fields this plugin added
-// (user/agent/session) plus the numeric fields, so the parser stays in sync with
-// the Checkpoint type.
+// memwalService.ts — long-lived MemWal service: round-trips a Checkpoint through Walrus
+// under a pluggable encrypt/decrypt seam. MemWal COMPOSES Walrus (MemWal -> Walrus,
+// never the reverse); the WalrusService is resolved via getService, never reconstructed.
+// The seam is plain bytes-in/bytes-out: empty = plain/demo mode, a present pair = prod
+// (whatever supplies it, e.g. Seal, owns that concern; MemWal stays Seal-agnostic).
+// readCheckpoint's parser requires the full Checkpoint shape (index-key + numeric fields).
 
 import { Service } from "@elizaos/core";
 import type { IAgentRuntime } from "@elizaos/core";
@@ -29,9 +17,7 @@ import type {
   WriteCheckpointResult,
 } from "./types.js";
 
-// The Walrus serviceType string. MemWal resolves the one long-lived WalrusService
-// the runtime owns via runtime.getService(WALRUS_SERVICE_TYPE); it mirrors
-// WalrusService.serviceType = "walrus". Dependency direction is MemWal -> Walrus.
+// The Walrus serviceType MemWal resolves (mirrors WalrusService.serviceType).
 const WALRUS_SERVICE_TYPE = "walrus";
 
 // --- Walrus contract MemWal consumes (structural mirror) ---------------------

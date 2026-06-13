@@ -1,20 +1,6 @@
-// index.ts — plugin-walrus assembly (Phase 1, Task 5).
-//
-// Wiring ONLY: assemble the already-built service, actions, and provider into a
-// single ElizaOS Plugin. No new behavior, no new types, no Phase-2+ concepts.
-// Phase 1 stores and reads OPAQUE BYTES ONLY — no Seal / MemWal / job / template
-// / Intake / signing-handshake concerns appear here.
-//
-// Service registration: WalrusService is listed as the CLASS in `services`
-// (Plugin.services is `(typeof Service)[]`). The ElizaOS runtime owns the
-// lifecycle — it starts ONE long-lived instance via the static start(runtime).
-// The service is NOT instantiated here or per action; the
-// actions and provider resolve that single instance through
-// runtime.getService(WalrusService.serviceType).
-//
-// Actions and the provider are registered as objects (Plugin.actions /
-// Plugin.providers). No `evaluators` key: Phase 1 declares none (evaluators are
-// post-interaction memory writes — Phase 3). See docs/plugin-shape.md.
+// index.ts — plugin-walrus assembly: wire the service (registered as a CLASS; the
+// runtime starts ONE long-lived instance via static start), actions, and provider into
+// one Plugin. Opaque bytes only; no evaluators.
 
 import type { Plugin, Service } from "@elizaos/core";
 

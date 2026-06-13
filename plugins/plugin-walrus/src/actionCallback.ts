@@ -1,15 +1,11 @@
-// actionCallback.ts — shared callback/return plumbing for the Walrus actions.
-//
-// The HandlerCallback is the PRIMARY action surface (PHASE1_PLAN gate item 5):
-// consumers and the Task-6b test assert on the emitted Content.data, NOT on the
-// handler's return value. The returned ActionResult is secondary (a boolean-ish
-// success signal for action chaining) and mirrors the same payload.
+// Shared callback/return plumbing for the Walrus actions. The HandlerCallback is
+// the PRIMARY action surface (consumers assert on the emitted Content.data); the
+// returned ActionResult is secondary and mirrors the same payload.
 
 import type { ActionResult, Content, HandlerCallback } from "@elizaos/core";
 import type { WalrusActionCallback } from "./types.js";
 
-// The walrus.error union member, as a factory so the actions don't repeat the
-// literal. Returns the Extract subtype so callers can read `.message` directly.
+// Factory for the walrus.error union member; the Extract subtype lets callers read `.message`.
 export function walrusError(
   operation: "store" | "read",
   errorName: string,
@@ -39,14 +35,9 @@ function toActionResult(
     : { success: false, text, error: text, data: { ...data } };
 }
 
-// Emit the callback AND build the matching return value in one step, so each
-// action branch is a single thin line. `ok` drives the ActionResult.success flag.
-//
-// We intentionally ignore the Memory[] that the HandlerCallback resolves to: the
-// callback's side effect (emitting Content the consumer/test asserts on) is the
-// action's output surface for Phase 1, and Handler returns ActionResult | void,
-// not those memories. Revisit in Task 6b if a runtime convention needs them
-// propagated.
+// Emit the callback AND build the matching return value in one step. The Memory[]
+// the HandlerCallback resolves to is intentionally ignored: the emitted Content is
+// the output surface, and Handler returns ActionResult | void.
 export async function settle(
   callback: HandlerCallback | undefined,
   ok: boolean,

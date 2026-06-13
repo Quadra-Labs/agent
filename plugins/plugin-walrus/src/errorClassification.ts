@@ -1,21 +1,10 @@
-// errorClassification.ts — pure, network-free classification of thrown errors
-// into the Phase-1 Walrus result `kind`s. Kept separate from walrusService so it
-// can be unit-tested in isolation (no @elizaos/core / WalrusClient import).
-//
-// WHY constructor-name matters (the Task-2 review defect):
-//   @mysten/walrus@1.1.7 declares its error classes as anonymous class
-//   *expressions* — `var BlobNotCertifiedError = class extends ... {}` — that
-//   never set `this.name`. So an instance reports `.name === "Error"` while
-//   `.constructor.name === "BlobNotCertifiedError"`. Matching on `.name` alone
-//   (the original bug) silently missed every SDK blob error and threw instead of
-//   returning a typed `blob_unavailable`. The spike classified on
-//   `err.constructor.name` for exactly this reason (p1_5_walrus_hardening.mjs).
-//
-//   The mirror case is DOMException-based aborts: `.constructor.name` is the
-//   generic "DOMException" while the meaningful kind lives in `.name`
-//   ("AbortError" / "TimeoutError"). So we never trust a single name — we
-//   classify against BOTH the constructor name and `.name`. This is a label set,
-//   never a closed discriminator: observed names can change.
+// errorClassification.ts — pure, network-free classification of thrown errors into the
+// Walrus result `kind`s (separate from walrusService for isolated unit testing).
+// GOTCHA: @mysten/walrus declares its error classes as anonymous expressions that never
+// set this.name, so an instance has .name === "Error" but .constructor.name ===
+// "BlobNotCertifiedError"; DOMException aborts are the mirror (kind lives in .name). So
+// we classify against BOTH constructor name and .name — an open label set, not a closed
+// discriminator.
 
 // Known Walrus blob-class error names meaning "no live, certified blob at this id".
 const BLOB_UNAVAILABLE_ERROR_NAMES = new Set<string>([

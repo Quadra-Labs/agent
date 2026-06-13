@@ -1,19 +1,11 @@
-// A1 plugin-memwal — locked MemWal contracts (types only). PLAIN mode: NO Seal.
-// The encrypt/decrypt seam here is a pair of pluggable plain function hooks; an
-// EMPTY seam (both undefined) is the valid default (demo/plain mode) and a present
-// pair is prod mode. The seam must stay Seal-agnostic: no Seal type, SessionKey,
-// packageId, or policyId may appear in this file. The actual Seal-backed seam
-// implementation is A2 and is out of scope here.
-//
-// MemWal composes Walrus (dependency direction MemWal -> Walrus); these types are
-// plain TS and import neither the Walrus nor the Seal service. The error `kind`
-// names mirror plugin-walrus's result unions so a later task can map the underlying
-// Walrus failure straight through.
+// plugin-memwal contracts (types only). The encrypt/decrypt seam is pluggable plain
+// function hooks: an EMPTY seam is plain/demo mode, a present pair is prod — it stays
+// Seal-agnostic (no Seal symbol may appear here). Error `kind` names mirror
+// plugin-walrus's result unions so a Walrus failure can map straight through.
 
 /**
- * The condensed session record stored as a blob and recalled on resume. Lifts the
- * demo's `Checkpoint` JSON shape (roomId/createdAt/turnCount/summary) and extends
- * it with the index-key fields so the index can resolve (user, agent, session).
+ * The condensed session record stored as a blob and recalled on resume:
+ * roomId/createdAt/turnCount/summary + the (user, agent, session) index-key triple.
  */
 export interface Checkpoint {
   readonly roomId: string;

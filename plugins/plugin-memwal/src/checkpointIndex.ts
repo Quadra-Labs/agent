@@ -1,43 +1,15 @@
-// checkpointIndex.ts — SQLite-backed checkpoint INDEX (A1, Task 3).
-//
-// Resolves (user, agent[, session]) -> blobId(s), newest-first. The index is
-// backed by the runtime's LOCAL DB (@elizaos/plugin-sql) so records SURVIVE a
-// service restart — NOT an in-memory map and NOT the demo's demo-state.json file
-// (that file pattern is the DEMO's; the plugin uses the runtime DB per PLAN.md
-// "Local/SQLite-backed"). It is a private collaborator OWNED by MemwalService:
-// the service self-records on every successful writeCheckpoint and exposes only
-// READ methods to callers (mirrors plugin-walrus recordHandle — no public mutator,
-// thus NO action->service write path).
-//
-// Verified against @elizaos/core 1.7.2 + @elizaos/plugin-sql 1.7.2:
-//   - runtime.createMemory(memory: Memory, tableName: string): Promise<UUID>
-//   - runtime.getMemories({ roomId, tableName, count? }): Promise<Memory[]>
-// We use a DEDICATED tableName ("memwal_checkpoints"), NOT the "messages" table
-// (that is chat). Two facts from chatMemory.ts drive the implementation:
-//   1. plugin-sql's memories table has NOT-NULL/foreign-key columns; the room and
-//      speaking entity must exist before createMemory or the insert violates a
-//      foreign key. We call runtime.ensureConnection(...) first (idempotent).
-//   2. getMemories returns NEWEST-first (ORDER BY created_at DESC), and two writes
-//      in the same millisecond would tie. We stamp each record with a strictly
-//      increasing per-namespace createdAt so back-to-back checkpoints for the same
-//      (user, agent) have a deterministic newest-first order.
-//
-// KEYING — the (user, agent[, session]) -> roomId map (decide and document):
-//   The runtime memory API queries by roomId (a UUID), but the index resolves on
-//   (user, agent). We derive a DETERMINISTIC UUID from the pair via
-//   stringToUuid(`memwal:${user}:${agent}`) and use THAT as the roomId for the
-//   index records — a NAMESPACE, not chat's room. So getMemories({ roomId, ... })
-//   returns exactly that pair's checkpoints. The full record (blobId, user, agent,
-//   session, createdAt, summary preview) lives in the memory's content; session is
-//   stored and exposed as an optional filter, but primary resolution is by
-//   (user, agent).
-//
-//   This derived id is a NAMESPACE, not a secret/key — it is a stable, public
-//   addressing label so a pair's checkpoints land in one queryable bucket. It
-//   grants NO access and protects NO data; confidentiality is the seam's concern
-//   (A2 / Seal), never this id's. It matters for the memory model: one pair's
-//   query must NEVER return another pair's checkpoint (namespaces are disjoint by
-//   construction — distinct (user, agent) pairs hash to distinct roomIds).
+// checkpointIndex.ts — SQLite-backed checkpoint INDEX: resolves (user, agent[, session])
+// -> blobId(s), newest-first, on the runtime's local DB (plugin-sql) so records survive a
+// restart. A private collaborator owned by MemwalService (self-records on writeCheckpoint;
+// exposes only reads). GOTCHAS that drive the impl:
+//   - dedicated tableName "memwal_checkpoints" (not "messages"/chat).
+//   - plugin-sql's memories table has FK columns: call ensureConnection first or the
+//     insert violates a foreign key.
+//   - getMemories returns NEWEST-first; back-to-back writes in one ms would tie, so each
+//     record gets a strictly-increasing per-namespace createdAt for deterministic order.
+//   - keying: roomId = stringToUuid(`memwal:${user}:${agent}`) — a NAMESPACE, not a
+//     secret. Distinct pairs hash to distinct roomIds, so one pair NEVER sees another's
+//     checkpoints (namespaces disjoint by construction).
 
 import { stringToUuid, ChannelType } from "@elizaos/core";
 import type { IAgentRuntime, Memory, UUID } from "@elizaos/core";

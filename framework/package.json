@@ -1,0 +1,24 @@
+{
+  "name": "@sui-walrus/agent-framework",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Developer Agent Framework: sealed memory rails + (later) skills/onTurn over the ElizaOS agent runtime.",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "chat:example": "tsx examples/chat.ts",
+    "chat:pokemon": "tsx examples/chat.ts --agent pokemon",
+    "chat:btc": "tsx examples/chat.ts --agent btc"
+  },
+  "dependencies": {
+    "@elizaos/core": "^1.7.2",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@sui-walrus/agent": "file:../app",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

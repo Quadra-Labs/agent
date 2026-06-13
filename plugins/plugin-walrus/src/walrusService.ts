@@ -1,14 +1,6 @@
-// walrusService.ts — long-lived Walrus client service (Phase 1, Task 2).
-//
-// Owns exactly ONE SuiJsonRpcClient + ONE WalrusClient, built inside the static
-// `start` lifecycle with NO network I/O, and reused across every store/read call.
-// Stores and reads OPAQUE BYTES ONLY. No Seal / MemWal / job / template / Intake
-// / signing-handshake concerns appear here.
-//
-// Ported call shapes (READ-ONLY references):
-//   phase0/spike/p1_walrus_roundtrip.mjs     — writeBlob/readBlob happy path
-//   phase0/spike/p1_5_walrus_hardening.mjs   — bad-id failure classification
-//   phase0/spike-evidence/P1_5-walrus-hardening.md — BlobNotCertifiedError mapping
+// walrusService.ts — long-lived Walrus client service: owns ONE SuiJsonRpcClient + ONE
+// WalrusClient (built in static start, no network I/O), reused across every store/read.
+// Opaque bytes only — no Seal/MemWal/job/template concerns.
 
 import { Service } from "@elizaos/core";
 import type { IAgentRuntime } from "@elizaos/core";

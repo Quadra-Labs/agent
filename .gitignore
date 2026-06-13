@@ -1,5 +1,5 @@
 # Dependencies
-node_modules/
+plugins/plugin-walrus/node_modules/
 
 # Build output
 dist/
@@ -37,4 +37,6 @@ Thumbs.db
 # Local-only project work (not part of the agent-framework repo)
 diagram/
 checkpoint_snapshots/
-phase0/
+task.md
+node_modules
+plugins/plugin-seal
