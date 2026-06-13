@@ -6,7 +6,7 @@
 // onTurn still has ordinary JS/Node capabilities; real isolation is out of scope.
 
 import type { SkillContext } from "../skills/defineSkill.js";
-import type { ChatTurn } from "../../../app/src/chatMemory.js";
+import type { ChatTurn } from "../../../app/src/chat/chatMemory.js";
 import type { LoopHttp } from "../http.js";
 import type { ToolPort } from "../tools/toolServer.js";
 

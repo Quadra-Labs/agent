@@ -6,12 +6,12 @@
 
 import type { IAgentRuntime } from "@elizaos/core";
 
-import { buildChatPrompt } from "../../../app/src/chat.js";
+import { buildChatPrompt } from "../../../app/src/chat/chat.js";
 import {
   saveTurn,
   listTurns,
   type ChatTurn,
-} from "../../../app/src/chatMemory.js";
+} from "../../../app/src/chat/chatMemory.js";
 import type { LoopModel, TurnResult } from "./loopContext.js";
 
 /** Inputs for the default reply text. No persistence happens here. */

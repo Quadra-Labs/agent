@@ -17,6 +17,12 @@ const DEFAULT_SMALL_MODEL = "llama-3.1-8b-instant";
 const DEFAULT_WALRUS_NETWORK = "testnet";
 const DEFAULT_WALRUS_EPOCHS = "3";
 
+// The Quadra services the agent signs requests to. Both default to the local dev
+// ports the intake-engine / data gateway listen on (intake-engine/README.md,
+// data/.env.example). Overridable via env for a remote deployment.
+const DEFAULT_INTAKE_URL = "http://localhost:5000";
+const DEFAULT_DATA_GATEWAY_URL = "http://localhost:8787";
+
 // Open-mode testnet Seal key servers, read on-chain in the P0c spike (NOT assumed).
 // Used to encrypt the job result under the quadra::job_access policy. Both run in
 // Open mode, so basic testnet encryption needs no API key (see phase0/spike/P0c-seal.md).
@@ -76,6 +82,17 @@ export interface AgentConfig {
   readonly sealKeyServerIds: readonly string[];
   /** Seal TSS threshold (how many key servers must return a key share). */
   readonly sealThreshold: number;
+  /** Intake-engine base URL the agent submits/delivers jobs to (env INTAKE_URL). */
+  readonly intakeUrl: string;
+  /** Data-gateway base URL the agent registers sealed results with (env DATA_GATEWAY_URL). */
+  readonly dataGatewayUrl: string;
+  /**
+   * OPTIONAL Sui signer secret used to AUTHENTICATE to the Quadra services (intake +
+   * gateway). Its address must be a registered agent on-chain. Reads AGENT_SECRET_KEY,
+   * falling back to WALRUS_SIGNER_KEY (the agent's one funded identity by default).
+   * Absent -> the job lifecycle stays inert (no signed calls). NEVER logged.
+   */
+  readonly agentSignerKey: string | undefined;
 }
 
 // Parse a positive-integer setting, falling back to `fallback` for a missing,
@@ -121,8 +138,8 @@ function readCsv(
  * with a provider chain need none of it. Pure aside from reading env.
  */
 export function loadAgentConfig(env: NodeJS.ProcessEnv = process.env): AgentConfig {
-  // app/.eliza-db lives one level up from src/.
-  const appRoot = resolve(here, "..");
+  // app/.eliza-db lives at the app root, two levels up from src/runtime/.
+  const appRoot = resolve(here, "..", "..");
 
   return {
     groqApiKey: readTrimmed(env, "GROQ_API_KEY"),
@@ -141,5 +158,8 @@ export function loadAgentConfig(env: NodeJS.ProcessEnv = process.env): AgentConf
     sealPackageId: readTrimmed(env, "SEAL_PACKAGE_ID"),
     sealKeyServerIds: readCsv(env, "SEAL_KEY_SERVER_IDS", DEFAULT_SEAL_KEY_SERVER_IDS),
     sealThreshold: readPositiveInt(env, "SEAL_THRESHOLD", DEFAULT_SEAL_THRESHOLD),
+    intakeUrl: readTrimmed(env, "INTAKE_URL") ?? DEFAULT_INTAKE_URL,
+    dataGatewayUrl: readTrimmed(env, "DATA_GATEWAY_URL") ?? DEFAULT_DATA_GATEWAY_URL,
+    agentSignerKey: readTrimmed(env, "AGENT_SECRET_KEY") ?? readTrimmed(env, "WALRUS_SIGNER_KEY"),
   };
 }

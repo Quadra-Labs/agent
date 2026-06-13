@@ -8,19 +8,19 @@ import type { IAgentRuntime } from "@elizaos/core";
 import {
   closeSession,
   type CloseOutcome,
-} from "../../../app/src/closeSession.js";
+} from "../../../app/src/session/closeSession.js";
 import {
   recallCheckpoint,
   type RecallOutcome,
-} from "../../../app/src/recallCheckpoint.js";
-import type { AgentCharacter } from "../../../app/src/character.js";
-import { listTurns } from "../../../app/src/chatMemory.js";
+} from "../../../app/src/session/recallCheckpoint.js";
+import type { AgentCharacter } from "../../../app/src/character/character.js";
+import { listTurns } from "../../../app/src/chat/chatMemory.js";
 import {
   seedTemplates,
   loadTemplates,
   renderTemplatesForPrompt,
   type JobTemplate,
-} from "../../../app/src/templates.js";
+} from "../../../app/src/templates/templates.js";
 
 import {
   createSessionState,

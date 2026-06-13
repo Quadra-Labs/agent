@@ -14,11 +14,8 @@
   },
   "scripts": {
     "build": "tsc",
-    "typecheck": "tsc --noEmit",
-    "typecheck:test": "tsc --noEmit -p tsconfig.test.json",
-    "test": "tsx --test test/**/*.test.ts"
+    "typecheck": "tsc --noEmit"
   },
-  "//tests": "Unit tests were moved to ../../proofs/plugins/plugin-memwal (archived, source-only plugins/). To run them, move the *.ts files back into test/ here; test and typecheck:test expect test/.",
   "dependencies": {
     "@elizaos/core": "^1.7.2",
     "@mysten/sui": "^2.17.0"

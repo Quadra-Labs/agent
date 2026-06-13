@@ -5,7 +5,7 @@
 
 import { ModelType } from "@elizaos/core";
 import type { IAgentRuntime } from "@elizaos/core";
-import type { ChatTurn } from "../../../app/src/chatMemory.js";
+import type { ChatTurn } from "../../../app/src/chat/chatMemory.js";
 import type {
   LoopContext,
   LoopModel,

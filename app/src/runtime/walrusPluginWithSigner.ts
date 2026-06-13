@@ -8,8 +8,8 @@
 import { Service } from "@elizaos/core";
 import type { IAgentRuntime, Plugin } from "@elizaos/core";
 
-import { WalrusService } from "../../plugins/plugin-walrus/src/walrusService.js";
-import { walrusPlugin } from "../../plugins/plugin-walrus/src/index.js";
+import { WalrusService } from "../../../plugins/plugin-walrus/src/walrusService.js";
+import { walrusPlugin } from "../../../plugins/plugin-walrus/src/index.js";
 import { getJsonRpcFullnodeUrl } from "@mysten/sui/jsonRpc";
 import { normalizeWalrusSigner } from "./walrusSigner.js";
 

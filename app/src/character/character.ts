@@ -13,8 +13,22 @@ import { parseMarkdownCharacter } from "./characterMarkdown.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
-// characters/ sits one level up from src/ (alongside .env, .eliza-db).
-const CHARACTERS_DIR = resolve(here, "..", "characters");
+// characters/ sits at the app root, two levels up from src/character/ (alongside .env, .eliza-db).
+const CHARACTERS_DIR = resolve(here, "..", "..", "characters");
+
+/**
+ * The agent's BROAD scope for the job-template pre-filter. NONE of these are the final
+ * capability decision (that is the agent's per-template self-selection); they only narrow
+ * the candidate set before the agent judges each one. All optional; absent -> permissive.
+ */
+export interface AgentCapabilities {
+  /** Allowed data-layer categories (e.g. ["finance"]); a template outside them is dropped. */
+  readonly categories?: readonly string[];
+  /** Allowed evaluator_id values or prefixes (e.g. ["btc-"]); the agent's oracle families. */
+  readonly evaluatorFamilies?: readonly string[];
+  /** OPTIONAL on-chain registration scope hint (reserved; not enforced yet). */
+  readonly registrationScope?: string;
+}
 
 /**
  * A user-authorable agent identity. `name` doubles as the checkpoint index `agent`
@@ -35,11 +49,17 @@ export interface AgentCharacter {
   readonly systemPrompt?: string;
   /**
    * OPTIONAL job-template category ids this agent offers (e.g. ["btc-price-guess"]).
-   * Absent or empty -> the agent does plain chat with NO job-intake section. When
-   * present, the CLI seeds + loads templates and injects ONLY the named ones into the
-   * prompt. Ids that do not match a known template are ignored (with a warning).
+   * LEGACY hint: now folded into the broad pre-filter as additional category/evaluator
+   * candidates (the menu is built from the real data-layer templates the agent
+   * self-selects). Kept recognized so existing character files keep working.
    */
   readonly templateCategoryIds?: readonly string[];
+  /**
+   * OPTIONAL broad scope for the job-template pre-filter (categories / evaluator
+   * families). Absent -> permissive (all fetched templates are candidates for
+   * self-selection). The final accept/reject decision is the agent's, per template.
+   */
+  readonly capabilities?: AgentCapabilities;
 }
 
 // The default identity: the original hardcoded "WalrusAgent". Kept here so runtime.ts
@@ -171,6 +191,8 @@ export function parseCharacter(path: string, parsed: unknown): LoadCharacterResu
       'character "templateCategoryIds", if present, must be an array of non-empty strings',
     );
   }
+  const capabilitiesResult = parseCapabilities(obj.capabilities);
+  if (!capabilitiesResult.ok) return invalid(capabilitiesResult.message);
 
   const character: AgentCharacter = {
     name: obj.name.trim(),
@@ -179,8 +201,47 @@ export function parseCharacter(path: string, parsed: unknown): LoadCharacterResu
     ...(obj.templateCategoryIds !== undefined
       ? { templateCategoryIds: (obj.templateCategoryIds as string[]).map((id) => id.trim()) }
       : {}),
+    ...(capabilitiesResult.capabilities !== undefined
+      ? { capabilities: capabilitiesResult.capabilities }
+      : {}),
   };
   return { ok: true, character };
+}
+
+// Validate the OPTIONAL capabilities block. Absent -> ok with undefined. A present block
+// must be an object; its sub-arrays (if present) non-empty arrays of non-empty strings, and
+// registrationScope (if present) a non-empty string. Pure.
+function parseCapabilities(
+  value: unknown,
+): { ok: true; capabilities?: AgentCapabilities } | { ok: false; message: string } {
+  if (value === undefined) return { ok: true };
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return { ok: false, message: 'character "capabilities", if present, must be an object' };
+  }
+  const obj = value as Record<string, unknown>;
+  const arrayField = (key: "categories" | "evaluatorFamilies"): string[] | undefined => {
+    const v = obj[key];
+    if (v === undefined) return undefined;
+    if (!Array.isArray(v) || !v.every(isNonEmptyString)) {
+      throw new Error(`character "capabilities.${key}", if present, must be an array of non-empty strings`);
+    }
+    return v.map((s) => (s as string).trim());
+  };
+  try {
+    const categories = arrayField("categories");
+    const evaluatorFamilies = arrayField("evaluatorFamilies");
+    if (obj.registrationScope !== undefined && !isNonEmptyString(obj.registrationScope)) {
+      return { ok: false, message: 'character "capabilities.registrationScope", if present, must be a non-empty string' };
+    }
+    const capabilities: AgentCapabilities = {
+      ...(categories !== undefined ? { categories } : {}),
+      ...(evaluatorFamilies !== undefined ? { evaluatorFamilies } : {}),
+      ...(isNonEmptyString(obj.registrationScope) ? { registrationScope: obj.registrationScope.trim() } : {}),
+    };
+    return { ok: true, capabilities };
+  } catch (err) {
+    return { ok: false, message: err instanceof Error ? err.message : "invalid capabilities" };
+  }
 }
 
 /**

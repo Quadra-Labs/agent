@@ -20,9 +20,9 @@ export {
 } from "./session/sessionState.js";
 
 // The agent identity type + the typed outcomes hosts branch on.
-export type { AgentCharacter } from "../../app/src/character.js";
-export type { CloseOutcome } from "../../app/src/closeSession.js";
-export type { RecallOutcome } from "../../app/src/recallCheckpoint.js";
+export type { AgentCharacter } from "../../app/src/character/character.js";
+export type { CloseOutcome } from "../../app/src/session/closeSession.js";
+export type { RecallOutcome } from "../../app/src/session/recallCheckpoint.js";
 
 // The skill primitive + its dispatcher. assertValidSkillName is the name guard.
 export {

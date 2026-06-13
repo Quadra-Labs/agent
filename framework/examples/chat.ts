@@ -34,8 +34,8 @@ import { fileURLToPath } from "node:url";
 
 import type { IAgentRuntime } from "@elizaos/core";
 
-import { loadAgentConfig } from "../../app/src/config.js";
-import { createAgentRuntime } from "../../app/src/runtime.js";
+import { loadAgentConfig } from "../../app/src/runtime/config.js";
+import { createAgentRuntime } from "../../app/src/runtime/runtime.js";
 import { makeStubRuntime, cannedModel } from "./stubRuntime.js";
 import {
   runAgent,

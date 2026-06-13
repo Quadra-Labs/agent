@@ -47,6 +47,21 @@ const COLLECTING = [
   "re-ask a parameter you do not yet have. Do not ask for the same value twice.",
 ].join(" ");
 
+// Proactively surface a matching job instead of waiting to be asked.
+const PROACTIVE_OFFER = [
+  "Be proactive: at a natural moment -- when the user describes a goal that resembles a job",
+  "you can do, or asks what you can help with -- briefly OFFER the single best-matching job",
+  "in plain language and invite them to go ahead. Do not wait to be asked, and do not list",
+  "internal details.",
+].join(" ");
+
+// Encourage completion: ask only for the still-missing details so the job can be finished.
+const ASK_FOR_MISSING = [
+  "Encourage the user toward a complete job: when they have given some of a job's details",
+  "but not all, acknowledge what you already have and ask ONLY for the specific details",
+  "still missing, one or two at a time, until you can complete it.",
+].join(" ");
+
 // When every parameter is collected, summarize in plain language and stop.
 const SUMMARY = [
   "When you have every parameter, give a short plain-language summary of the job",
@@ -117,7 +132,9 @@ export function renderTemplates(templatesText?: string): readonly string[] {
     "",
     "How to behave for job intake:",
     `- ${MATCHING}`,
+    `- ${PROACTIVE_OFFER}`,
     `- ${COLLECTING}`,
+    `- ${ASK_FOR_MISSING}`,
     `- ${SUMMARY}`,
     `- ${NEVER_LEAK}`,
     "",

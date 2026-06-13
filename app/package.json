@@ -5,10 +5,10 @@
   "type": "module",
   "description": "ElizaOS agent app: boots the runtime with all four plugins (sql, groq, walrus, memwal) live.",
   "scripts": {
-    "chat": "tsx src/cli.ts",
-    "typecheck": "tsc --noEmit"
+    "chat": "tsx src/runtime/cli.ts",
+    "typecheck": "tsc --noEmit",
+    "seed:template": "tsx src/templates/seedTemplate.ts"
   },
-  "//proofs": "Proof/smoke scripts were moved to ../../proofs/apps (archived, source-only apps/). To run them, move the files back into src/ and restore the boot/roundtrip/*:proof/test scripts (see git history or ../../proofs/apps).",
   "dependencies": {
     "@elizaos/core": "^1.7.2",
     "@elizaos/plugin-groq": "^1.0.4",

@@ -10,9 +10,9 @@ import groqPlugin from "@elizaos/plugin-groq";
 import sqlPlugin, { createDatabaseAdapter } from "@elizaos/plugin-sql";
 
 import { walrusPluginWithSigner } from "./walrusPluginWithSigner.js";
-import { memwalPlugin } from "../../plugins/plugin-memwal/src/index.js";
+import { memwalPlugin } from "../../../plugins/plugin-memwal/src/index.js";
 import type { AgentConfig } from "./config.js";
-import { DEFAULT_CHARACTER, type AgentCharacter } from "./character.js";
+import { DEFAULT_CHARACTER, type AgentCharacter } from "../character/character.js";
 
 // Fixed embedding width. 384 matches plugin-sql's smallest supported vector dim
 // (VECTOR_DIMS.SMALL -> dim384), so a stored vector lands in a real column.

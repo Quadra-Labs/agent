@@ -11,8 +11,7 @@ import { SealClient } from "@mysten/seal";
 import { SuiJsonRpcClient, getJsonRpcFullnodeUrl } from "@mysten/sui/jsonRpc";
 import { toHex } from "@mysten/bcs";
 
-import type { WalrusStoreResult } from "../../plugins/plugin-walrus/src/types.js";
-import type { JobTemplate } from "./templates.js";
+import type { IntakeTemplate } from "../templates/intakeTemplate.js";
 
 // plugin-groq swallows API errors into this sentinel. Treat it as a hard failure so we
 // never encrypt a fake "result". Lifted from chat.ts / intakeNotification.ts.
@@ -36,17 +35,17 @@ export type ProduceResultResult =
 // must return ONLY a flat JSON object with exactly the schema's keys. It never sees the
 // raw template object, so it cannot echo internal fields.
 function buildResultPrompt(
-  template: JobTemplate,
+  template: IntakeTemplate,
   collected: Record<string, string>,
 ): string {
-  const schemaLines = Object.entries(template.job_template.output)
+  const schemaLines = Object.entries(template.output)
     .map(([key, type]) => `  - ${key} (${type})`)
     .join("\n");
   const inputLines = Object.entries(collected)
     .map(([key, value]) => `  - ${key}: ${value}`)
     .join("\n");
   return [
-    `Produce the result for a "${template.title}" job, using the inputs below.`,
+    `Produce the result for a "${template.description}" job, using the inputs below.`,
     "Output ONLY a single JSON object with EXACTLY these keys and value types:",
     schemaLines,
     "",
@@ -64,7 +63,7 @@ function buildResultPrompt(
 // {...} span so a fenced/prose-wrapped reply still parses. Any deviation from the schema
 // (parse failure, missing key, extra key, wrong primitive type) -> ok:false invalid.
 function parseResult(
-  output: JobTemplate["job_template"]["output"],
+  output: IntakeTemplate["output"],
   raw: string,
 ): { ok: true; result: JobResult } | { ok: false; message: string } {
   const start = raw.indexOf("{");
@@ -112,9 +111,9 @@ function parseResult(
  * typed failure (model_error for a failed/empty LLM call, invalid_result for off-schema
  * output). NEVER throws. The result object is NOT logged here (the caller decides).
  */
-export async function produceResult(
+async function produceResult(
   runtime: IAgentRuntime,
-  template: JobTemplate,
+  template: IntakeTemplate,
   collected: Record<string, string>,
 ): Promise<ProduceResultResult> {
   let raw: unknown;
@@ -141,7 +140,7 @@ export async function produceResult(
       retryable: true,
     };
   }
-  const parsed = parseResult(template.job_template.output, text);
+  const parsed = parseResult(template.output, text);
   if (!parsed.ok) {
     return {
       ok: false,
@@ -180,9 +179,8 @@ export type SealEncryptResult =
 
 // Map the UTF-8 job id to the Seal identity bytes the on-chain seal_approve expects.
 // seal_approve does string::utf8(id); @mysten/seal hex-decodes the id string. So the
-// identity is the hex of the job id's UTF-8 bytes. Exported for the proof to assert the
-// exact binding rather than re-deriving it.
-export function jobIdToSealId(jobId: string): string {
+// identity is the hex of the job id's UTF-8 bytes.
+function jobIdToSealId(jobId: string): string {
   return toHex(new TextEncoder().encode(jobId));
 }
 
@@ -193,7 +191,7 @@ export function jobIdToSealId(jobId: string): string {
  * / key-server failure. NEVER throws. The plaintext result and the symmetric backup key
  * (encrypt() also returns `key`) are NEVER logged or returned — only the ciphertext.
  */
-export async function sealEncryptResult(input: SealEncryptInput): Promise<SealEncryptResult> {
+async function sealEncryptResult(input: SealEncryptInput): Promise<SealEncryptResult> {
   const packageId = input.packageId.trim();
   if (packageId.length === 0) {
     return {
@@ -250,25 +248,13 @@ export async function sealEncryptResult(input: SealEncryptInput): Promise<SealEn
   }
 }
 
-// --- 3. produce -> encrypt -> store (the single entry point) -----------------------
+// --- 3. produce -> seal (the data-gateway delivery path) ---------------------------
 
-// The Walrus surface this module drives, narrowed to store() only. Mirrors templates.ts:
-// app depends on the runtime CONTRACT (getService("walrus")), not the plugin class.
-type WalrusLike = {
-  store(bytes: Uint8Array): Promise<WalrusStoreResult>;
-};
-
-function resolveWalrus(runtime: IAgentRuntime): WalrusLike | undefined {
-  const resolved = runtime.getService("walrus");
-  if (resolved === undefined || resolved === null) return undefined;
-  return resolved as unknown as WalrusLike;
-}
-
-export interface StoreJobResultInput {
+export interface SealResultInput {
   /** The on-chain job id; the Seal identity binds to it (and to the access record). */
   readonly jobId: string;
-  /** The matched template (its job_template.output is the result schema). */
-  readonly template: JobTemplate;
+  /** The matched template (its output is the result schema). */
+  readonly template: IntakeTemplate;
   /** The collected parameter values the result is produced from. */
   readonly collected: Record<string, string>;
   /** Deployed quadra package id (config.sealPackageId). Absent -> config_error. */
@@ -281,43 +267,30 @@ export interface StoreJobResultInput {
   readonly network: "testnet" | "mainnet" | "devnet" | "localnet";
 }
 
-export type StoreJobResultResult =
-  | { ok: true; blobId: string; sealId: string }
+export type ProduceAndSealResult =
+  | { ok: true; ciphertext: Uint8Array; sealId: string }
   | { ok: false; kind: "config_error"; errorName: string; message: string; retryable: false }
   | { ok: false; kind: "model_error"; errorName: string; message: string; retryable: true }
   | { ok: false; kind: "invalid_result"; errorName: string; message: string; retryable: false }
-  | { ok: false; kind: "seal_error"; errorName: string; message: string; retryable: true }
-  | { ok: false; kind: "network_error"; errorName: string; message: string; retryable: true }
-  | { ok: false; kind: "blob_unavailable"; errorName: string; message: string; retryable: false };
+  | { ok: false; kind: "seal_error"; errorName: string; message: string; retryable: true };
 
 /**
- * The job-is-done write path: produce the real result, Seal-encrypt it under the job_id,
- * and store the ciphertext on Walrus. Each stage short-circuits with its own typed kind;
- * a Walrus store failure maps the underlying WalrusStoreResult kind straight through.
- * NEVER throws, NEVER logs the result/key bytes. On success returns the durable blobId
- * plus the sealId (the encrypt-time binding) so the caller can record where the result
- * lives and under which identity it was sealed.
+ * Produce the real result and Seal-encrypt it under id = hex(jobId), stopping at the
+ * CIPHERTEXT — no Walrus write. This is the delivery path used with the data gateway:
+ * the gateway (data/src/seal.ts storeSealed) does the durable Walrus write + indexing,
+ * so the agent only needs the ciphertext to register via dataGatewayClient. Reuses
+ * produceResult + sealEncryptResult; NEVER throws, NEVER logs the result/key bytes.
  */
-export async function storeJobResult(
+export async function produceAndSealResult(
   runtime: IAgentRuntime,
-  input: StoreJobResultInput,
-): Promise<StoreJobResultResult> {
+  input: SealResultInput,
+): Promise<ProduceAndSealResult> {
   if (input.packageId === undefined || input.packageId.trim().length === 0) {
     return {
       ok: false,
       kind: "config_error",
       errorName: "MissingSealPackageId",
-      message: "SEAL_PACKAGE_ID is not set; job result not encrypted/stored",
-      retryable: false,
-    };
-  }
-  const walrus = resolveWalrus(runtime);
-  if (walrus === undefined) {
-    return {
-      ok: false,
-      kind: "config_error",
-      errorName: "WalrusServiceUnavailable",
-      message: "walrus service is not registered",
+      message: "SEAL_PACKAGE_ID is not set; job result not encrypted",
       retryable: false,
     };
   }
@@ -335,16 +308,5 @@ export async function storeJobResult(
   });
   if (!encrypted.ok) return encrypted;
 
-  const stored = await walrus.store(encrypted.ciphertext);
-  if (!stored.ok) {
-    // Map the typed Walrus store failure through unchanged (network_error / config_error).
-    return {
-      ok: false,
-      kind: stored.kind,
-      errorName: stored.errorName,
-      message: stored.message,
-      retryable: stored.retryable,
-    } as StoreJobResultResult;
-  }
-  return { ok: true, blobId: stored.blobId, sealId: encrypted.sealId };
+  return { ok: true, ciphertext: encrypted.ciphertext, sealId: encrypted.sealId };
 }

@@ -6,23 +6,26 @@
 
 import { createInterface } from "node:readline";
 
+import type { Signer } from "@mysten/sui/cryptography";
+
 import { loadAgentConfig } from "./config.js";
 import { createAgentRuntime, type AgentRuntimeHandle } from "./runtime.js";
-import { respond } from "./chat.js";
-import { closeSession } from "./closeSession.js";
-import { recallCheckpoint } from "./recallCheckpoint.js";
+import { respond } from "../chat/chat.js";
+import { closeSession } from "../session/closeSession.js";
+import { recallCheckpoint } from "../session/recallCheckpoint.js";
+import { normalizeWalrusSigner } from "./walrusSigner.js";
+import { listTurns } from "../chat/chatMemory.js";
+import { advanceJobLifecycle, type JobState } from "../jobs/jobLifecycle.js";
+import { startDeliveryPoll, type DeliveryPollHandle, type DeliveryOutcome } from "../jobs/deliveryPoll.js";
+import type { IntakeSession } from "../quadra/intakeClient.js";
 import {
   DEFAULT_CHARACTER,
   loadCharacter,
   listCharacters,
   type AgentCharacter,
-} from "./character.js";
-import {
-  seedTemplates,
-  loadTemplates,
-  renderTemplatesForPrompt,
-  type JobTemplate,
-} from "./templates.js";
+} from "../character/character.js";
+import { resolveMenu } from "../templates/menuOrchestrator.js";
+import type { IntakeTemplate } from "../templates/intakeTemplate.js";
 
 const DEFAULT_USER = "local-user";
 
@@ -91,6 +94,20 @@ function errorDetail(err: unknown): string {
   return String(err);
 }
 
+// Render a background delivery-poll outcome into a user-facing line.
+function describeDeliveryOutcome(outcome: DeliveryOutcome, session: IntakeSession): string {
+  switch (outcome.kind) {
+    case "released":
+      return `Payment released for job ${session.job_id}. Job complete.`;
+    case "rejected":
+      return `Delivery could not be released: ${outcome.reason}.`;
+    case "unpaid":
+      return `No payment was received for session ${session.session_id}; the job session expired.`;
+    case "timeout":
+      return "The delivery window elapsed without release; the intake engine will refund the user.";
+  }
+}
+
 // Resolve the character: a --character ref loads + validates a file; absent uses the
 // default identity. A load failure is fatal (the user explicitly asked for it), so we
 // print the typed reason and exit rather than silently falling back.
@@ -102,37 +119,6 @@ async function resolveCharacter(ref: string | undefined): Promise<AgentCharacter
     process.exit(1);
   }
   return result.character;
-}
-
-// Seed the default template set on Walrus, read it back, and keep ONLY the categories
-// the character named. Returns the rendered prompt block, or undefined when the
-// character offers no templates / the set is empty. A Walrus failure is fatal here
-// (full-setup mode guarantees a funded signer, so a failure is a real problem worth
-// surfacing, not a silent degrade).
-async function resolveTemplatesText(
-  handle: AgentRuntimeHandle,
-  character: AgentCharacter,
-): Promise<string | undefined> {
-  const wanted = character.templateCategoryIds ?? [];
-  if (wanted.length === 0) return undefined;
-
-  const seeded = await seedTemplates(handle.runtime);
-  if (!seeded.ok) {
-    throw new Error(`Could not seed job templates on Walrus (${seeded.kind}): ${seeded.message}`);
-  }
-  const loaded = await loadTemplates(handle.runtime, seeded.blobId);
-  if (!loaded.ok) {
-    throw new Error(`Could not load job templates from Walrus (${loaded.kind}): ${loaded.message}`);
-  }
-
-  const wantedSet = new Set(wanted);
-  const selected: JobTemplate[] = loaded.templates.filter((t) => wantedSet.has(t.category_id));
-  const missing = wanted.filter((id) => !selected.some((t) => t.category_id === id));
-  if (missing.length > 0) {
-    console.warn(`Note: character names unknown template ids, ignoring: ${missing.join(", ")}`);
-  }
-  if (selected.length === 0) return undefined;
-  return renderTemplatesForPrompt(selected);
 }
 
 const HELP = [
@@ -188,19 +174,25 @@ async function main(): Promise<void> {
   const runToken = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   const roomId = `cli-${character.name}-${args.user}-${runToken}`;
 
-  // Optional job-template block for the system prompt (only if the character offers
-  // templates). Resolved once at boot.
+  // Read the REAL job templates from the data gateway, self-select the ones this agent
+  // offers, and cache the menu in MemWal. resolveMenu NEVER throws and degrades cleanly
+  // (gateway outage -> cached menu or no jobs), so a hiccup here is a soft note, not a
+  // fatal boot failure. The selected menu drives both the system prompt and the lifecycle.
   let templatesText: string | undefined;
-  try {
-    templatesText = await resolveTemplatesText(handle, character);
-    if (templatesText !== undefined) {
-      console.log("Job templates loaded; the agent can do job intake for its categories.");
-    }
-  } catch (err) {
-    console.error("Template setup failed:");
-    console.error(errorDetail(err));
-    await handle.stop();
-    process.exit(1);
+  let jobTemplates: readonly IntakeTemplate[] = [];
+  const menu = await resolveMenu({
+    runtime: handle.runtime,
+    character,
+    dataGatewayUrl: config.dataGatewayUrl,
+    selectorModel: config.groqLargeModel,
+  });
+  templatesText = menu.text;
+  jobTemplates = menu.templates;
+  for (const note of menu.notes) console.log(`[menu] ${note}`);
+  if (jobTemplates.length > 0) {
+    console.log(`Job menu ready (${menu.source}); the agent can offer ${jobTemplates.length} job type(s).`);
+  } else {
+    console.log("No offerable jobs for this agent right now; continuing as plain chat.");
   }
 
   // Recall any prior checkpoint for this (user, agent) and seed the resumed summary.
@@ -218,6 +210,28 @@ async function main(): Promise<void> {
     console.log("No prior checkpoint for this user/agent — starting fresh.");
   }
 
+  // Arm the automatic job lifecycle: resolve the agent signer (AGENT_SECRET_KEY ??
+  // WALRUS_SIGNER_KEY) used to authenticate to the intake engine + data gateway.
+  // Full-setup mode guarantees a signer key is present; a parse failure disables the
+  // lifecycle (chat still works) instead of crashing. The key is never printed.
+  const signerRes = normalizeWalrusSigner(config.agentSignerKey ?? "");
+  const lifecycleSigner: Signer | undefined = signerRes.ok ? signerRes.signer : undefined;
+  if (jobTemplates.length > 0) {
+    if (lifecycleSigner !== undefined) {
+      console.log(
+        `Job lifecycle armed: I'll open a job with the intake engine at ${config.intakeUrl} when I accept one.`,
+      );
+    } else {
+      console.warn(
+        `(job lifecycle disabled: agent signer unparseable — ${signerRes.ok ? "ok" : signerRes.reason})`,
+      );
+    }
+  }
+  const lifecycleArmed = jobTemplates.length > 0 && lifecycleSigner !== undefined;
+  let jobState: JobState = { phase: "idle" };
+  // The background delivery poller, once a job's result is registered. Cancelled on exit.
+  let deliveryPoll: DeliveryPollHandle | undefined;
+
   console.log("");
   console.log(HELP);
   console.log("");
@@ -229,6 +243,7 @@ async function main(): Promise<void> {
   const shutdown = async (code: number): Promise<void> => {
     if (stopping) return;
     stopping = true;
+    deliveryPoll?.cancel();
     rl.close();
     await handle.stop();
     process.exit(code);
@@ -330,6 +345,52 @@ async function main(): Promise<void> {
       });
       resumedSummary = undefined;
       console.log(`${character.name}> ${reply}`);
+
+      // Advance the job lifecycle (accept -> open -> register) from the updated
+      // transcript. Self-contained try/catch: a lifecycle hiccup never breaks the chat.
+      // When the result is registered (phase -> "delivering"), hand delivery to the
+      // background poller so it completes even if the user stops chatting.
+      if (lifecycleArmed && lifecycleSigner !== undefined) {
+        try {
+          const turns = await listTurns(handle.runtime, roomId);
+          const beforePhase = jobState.phase;
+          const advanced = await advanceJobLifecycle({
+            runtime: handle.runtime,
+            turns,
+            config,
+            signer: lifecycleSigner,
+            templates: jobTemplates,
+            state: jobState,
+          });
+          jobState = advanced.state;
+          for (const note of advanced.notes) console.log(`[job] ${note}`);
+
+          if (
+            beforePhase !== "delivering" &&
+            jobState.phase === "delivering" &&
+            deliveryPoll === undefined &&
+            jobState.session !== undefined
+          ) {
+            const session = jobState.session;
+            console.log(
+              "[job] Result is in. I'll deliver to the intake engine as soon as your payment confirms — no need to keep chatting.",
+            );
+            deliveryPoll = startDeliveryPoll({
+              baseUrl: config.intakeUrl,
+              signer: lifecycleSigner,
+              session,
+              startedAtMs: jobState.submittedAtMs ?? Date.now(),
+              onDone: (outcome) => {
+                deliveryPoll = undefined;
+                jobState = { phase: "done" };
+                console.log(`[job] ${describeDeliveryOutcome(outcome, session)}`);
+              },
+            });
+          }
+        } catch (err) {
+          console.error(`(job lifecycle error: ${errorDetail(err)})`);
+        }
+      }
     } catch (err) {
       console.error(`(reply failed: ${errorDetail(err)})`);
     }

@@ -10,7 +10,7 @@ import type { IAgentRuntime } from "@elizaos/core";
 import type {
   Checkpoint,
   ReadCheckpointResult,
-} from "../../plugins/plugin-memwal/src/types.js";
+} from "../../../plugins/plugin-memwal/src/types.js";
 
 // The MemWal read surface, resolved structurally from getService("memwal"). The locked
 // contract TYPE (ReadCheckpointResult)

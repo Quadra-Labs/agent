@@ -10,7 +10,7 @@
 // budget (worst case = maxModelCalls + 1), reported via ToolLoopResult.forcedFinal.
 // The transcript is EPHEMERAL — only the user+agent reply pair is persisted.
 
-import type { ChatTurn } from "../../../app/src/chatMemory.js";
+import type { ChatTurn } from "../../../app/src/chat/chatMemory.js";
 import type { LoopModel } from "../session/loopContext.js";
 import type { ToolPort } from "./toolServer.js";
 import {

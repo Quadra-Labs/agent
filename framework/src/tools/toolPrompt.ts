@@ -11,8 +11,8 @@ import {
   renderHistory,
   renderResumedContext,
   renderTemplates,
-} from "../../../app/src/chat.js";
-import type { ChatTurn } from "../../../app/src/chatMemory.js";
+} from "../../../app/src/chat/chat.js";
+import type { ChatTurn } from "../../../app/src/chat/chatMemory.js";
 import type { ToolDescriptor } from "./toolServer.js";
 
 // The default lead when the agent declares no systemPrompt.

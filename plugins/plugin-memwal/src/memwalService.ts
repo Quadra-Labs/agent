@@ -10,12 +10,15 @@ import type { IAgentRuntime } from "@elizaos/core";
 
 import { CheckpointIndex } from "./checkpointIndex.js";
 import type { CheckpointIndexRecord } from "./checkpointIndex.js";
+import { MenuIndex } from "./menuIndex.js";
 import type {
   Checkpoint,
   MemwalSeam,
   ReadCheckpointResult,
   WriteCheckpointResult,
 } from "./types.js";
+import { isMenuRecord } from "./menuTypes.js";
+import type { MenuRecord, ReadMenuResult, WriteMenuResult } from "./menuTypes.js";
 
 // The Walrus serviceType MemWal resolves (mirrors WalrusService.serviceType).
 const WALRUS_SERVICE_TYPE = "walrus";
@@ -103,6 +106,10 @@ export class MemwalService extends Service {
   // walrus's recordHandle: no action->service write path).
   private indexCache: CheckpointIndex | undefined;
 
+  // The SQLite-backed MENU index, a separate private collaborator (distinct table +
+  // namespace) so the job-template menu cache never collides with checkpoints.
+  private menuIndexCache: MenuIndex | undefined;
+
   // PRIVATE constructor: construction goes through start()/fromConfig() only. A
   // function seam cannot round-trip through runtime string settings, so the seam
   // is injected via fromConfig (same reasoning as walrus's signer). NO network I/O.
@@ -155,6 +162,18 @@ export class MemwalService extends Service {
       this.indexCache = new CheckpointIndex(runtime);
     }
     return this.indexCache;
+  }
+
+  // Resolve (lazily build) the MENU index. Same lifecycle as the checkpoint index but a
+  // distinct collaborator (its own table + namespace), so menu and checkpoint records never
+  // share a bucket. Returns undefined only if the service has no runtime.
+  private resolveMenuIndex(): MenuIndex | undefined {
+    const runtime = this.runtime as IAgentRuntime | undefined;
+    if (runtime === undefined) return undefined;
+    if (this.menuIndexCache === undefined) {
+      this.menuIndexCache = new MenuIndex(runtime);
+    }
+    return this.menuIndexCache;
   }
 
   // --- Index read methods (public; no public mutator) ------------------------
@@ -381,6 +400,101 @@ export class MemwalService extends Service {
         message: messageOf(err),
         retryable: false,
       };
+    }
+  }
+
+  // --- Menu operations (additive; the checkpoint path above is untouched) ----
+  // The agent's self-selected job-template menu is cached here so the conversation layer can
+  // read it without re-deriving every turn. MemWal is NOT the source of truth — the record
+  // carries sourceHash so a caller compares it to a fresh fetch and rebuilds when stale.
+
+  // writeMenu: JSON-encode -> (optional encrypt seam) -> walrus.store -> self-record into the
+  // MENU index. Mirrors writeCheckpoint's best-effort indexing: the blob is durable on
+  // ok:true regardless of whether the index entry landed (`indexed` reports it). NEVER throws.
+  async writeMenu(menu: MenuRecord): Promise<WriteMenuResult> {
+    const walrus = this.resolveWalrus();
+    if (walrus === undefined) {
+      return {
+        ok: false,
+        kind: "config_error",
+        errorName: "MemwalConfigError",
+        message: "walrus service is not registered",
+        retryable: false,
+      };
+    }
+
+    const plain = encoder.encode(JSON.stringify(menu));
+    const bytes = this.cfg.seam.encrypt ? await this.cfg.seam.encrypt(plain) : plain;
+
+    const result = await walrus.store(bytes);
+    if (result.ok) {
+      const index = this.resolveMenuIndex();
+      let indexed = false;
+      if (index !== undefined) {
+        try {
+          await index.record({ agent: menu.agent, blobId: result.blobId, sourceHash: menu.sourceHash });
+          indexed = true;
+        } catch (err) {
+          const note = `memwal: menu blob ${result.blobId} is durable but its index entry for agent ${menu.agent} failed to record: ${messageOf(err)}`;
+          const logger = (this.runtime as IAgentRuntime | undefined)?.logger;
+          if (logger?.warn) logger.warn({ blobId: result.blobId, agent: menu.agent }, note);
+          else if (typeof console !== "undefined" && typeof console.warn === "function") console.warn(note);
+        }
+      }
+      return { ok: true, blobId: result.blobId, indexed };
+    }
+    if (result.kind === "network_error") {
+      return { ok: false, kind: "network_error", errorName: result.errorName, message: result.message, retryable: true };
+    }
+    return { ok: false, kind: "config_error", errorName: result.errorName, message: result.message, retryable: false };
+  }
+
+  // latestMenuMeta: the newest menu's blobId + sourceHash for an agent WITHOUT a blob read —
+  // the cheap staleness check (compare sourceHash to a fresh fetch before reading the blob).
+  async latestMenuMeta(
+    agent: string,
+  ): Promise<{ blobId: string; sourceHash: string; createdAt: number } | undefined> {
+    const index = this.resolveMenuIndex();
+    if (index === undefined) return undefined;
+    const record = await index.latestRecord(agent);
+    if (record === undefined) return undefined;
+    return { blobId: record.blobId, sourceHash: record.sourceHash, createdAt: record.createdAt };
+  }
+
+  // readLatestMenu: resolve the newest menu blobId for an agent, read it back through Walrus +
+  // the optional decrypt seam, and validate. not_found when no entry; invalid_menu for a blob
+  // that read back malformed; Walrus failure kinds pass through. NEVER throws.
+  async readLatestMenu(agent: string): Promise<ReadMenuResult> {
+    const walrus = this.resolveWalrus();
+    if (walrus === undefined) {
+      return { ok: false, kind: "config_error", errorName: "MemwalConfigError", message: "walrus service is not registered", retryable: false };
+    }
+    const index = this.resolveMenuIndex();
+    const blobId = index !== undefined ? await index.latest(agent) : undefined;
+    if (blobId === undefined) {
+      return { ok: false, kind: "not_found", message: `no cached menu for agent ${agent}` };
+    }
+
+    const result = await walrus.read(blobId);
+    if (!result.ok) {
+      if (result.kind === "blob_unavailable") {
+        return { ok: false, kind: "blob_unavailable", blobId, errorName: result.errorName, message: result.message, retryable: false };
+      }
+      if (result.kind === "network_error") {
+        return { ok: false, kind: "network_error", errorName: result.errorName, message: result.message, retryable: true };
+      }
+      return { ok: false, kind: "config_error", errorName: result.errorName, message: result.message, retryable: false };
+    }
+
+    try {
+      const bytes = this.cfg.seam.decrypt ? await this.cfg.seam.decrypt(result.bytes) : result.bytes;
+      const parsed: unknown = JSON.parse(decoder.decode(bytes));
+      if (!isMenuRecord(parsed)) {
+        return { ok: false, kind: "invalid_menu", blobId, errorName: "InvalidMenuError", message: `Menu blob ${blobId} is missing or has malformed fields.`, retryable: false };
+      }
+      return { ok: true, menu: parsed };
+    } catch (err) {
+      return { ok: false, kind: "invalid_menu", blobId, errorName: errorNameOf(err), message: messageOf(err), retryable: false };
     }
   }
 }

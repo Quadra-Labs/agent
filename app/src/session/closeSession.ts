@@ -6,11 +6,11 @@
 import { ModelType } from "@elizaos/core";
 import type { IAgentRuntime } from "@elizaos/core";
 
-import { listTurns, type ChatTurn } from "./chatMemory.js";
+import { listTurns, type ChatTurn } from "../chat/chatMemory.js";
 import type {
   Checkpoint,
   WriteCheckpointResult,
-} from "../../plugins/plugin-memwal/src/types.js";
+} from "../../../plugins/plugin-memwal/src/types.js";
 
 // plugin-groq returns this sentinel instead of throwing; treat it as a hard summarize
 // failure so we never store a fake summary.

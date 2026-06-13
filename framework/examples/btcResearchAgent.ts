@@ -239,8 +239,10 @@ export const predictBtcPriceTool = defineTool({
   name: "predict_btc_price",
   description:
     "Produce a short-horizon ILLUSTRATIVE BTC price extrapolation N minutes ahead from " +
-    "the recent Coinbase minute trend. Use when the user asks for a prediction or " +
-    "forecast 'in/after N minutes'. The result is a mechanical extrapolation, not advice.",
+    "the recent Coinbase minute trend. Use ONLY when the user EXPLICITLY asks for a " +
+    "prediction or forecast (e.g. 'predict in 17 minutes', 'forecast 10 min ahead'). A " +
+    "bare number on its own (e.g. '7') is NOT a request to predict. The result is a " +
+    "mechanical extrapolation, not advice.",
   input: z.object({
     horizonMinutes: z
       .number()
@@ -295,10 +297,14 @@ const btcResearchAgent = defineAgent({
     "windowMinutes set to the period they asked about (e.g. 30 for the last 30 " +
     "minutes; omit for the default 60), then answer using the window it actually " +
     "covered. " +
-    "WHEN the user asks for a prediction or forecast for N minutes ahead (e.g. '17 " +
-    "minutes later'): call predict_btc_price with horizonMinutes set to N, then answer " +
-    "using its output. ALWAYS present it as a mechanical extrapolation of the recent " +
-    "trend, not a forecast to trade on; you MAY share this illustrative figure and band. " +
+    "WHEN the user EXPLICITLY asks for a prediction or forecast — using words like " +
+    "'predict'/'forecast', or clearly 'in/after N minutes' — call predict_btc_price with " +
+    "horizonMinutes set to N, then answer using its output. ALWAYS present it as a " +
+    "mechanical extrapolation of the recent trend, not a forecast to trade on; you MAY " +
+    "share this illustrative figure and band. " +
+    "A bare number on its own (e.g. '7'), gibberish, or typo'd input is NOT a request to " +
+    "predict and NOT a tool trigger: do NOT call any tool — briefly ask the user what " +
+    "they'd like (e.g. a price, a range, volume, or a prediction over some minutes). " +
     "For ANY other message — greetings, follow-ups, or questions about your method — " +
     "answer directly WITHOUT calling tools. If asked how you got a price: it comes " +
     "from the public Coinbase spot API; the range is a mechanical +/- percentage band " +

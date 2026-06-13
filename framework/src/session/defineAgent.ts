@@ -3,7 +3,7 @@
 // definition shape (throws on a malformed one) and assembles the value; nothing touches
 // the runtime. skills = the ctx.callSkill ALLOW-LIST (not auto-dispatch).
 
-import type { AgentCharacter } from "../../../app/src/character.js";
+import type { AgentCharacter } from "../../../app/src/character/character.js";
 import type { AnySkill } from "../skills/skillRunner.js";
 import type { AnyTool } from "../tools/defineTool.js";
 import type { ModelSpec } from "../models.js";

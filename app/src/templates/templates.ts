@@ -3,13 +3,18 @@
 // ({ output, lifetime }); the raw template is NEVER shown to the user —
 // renderTemplatesForPrompt produces a system-prompt-only description. seed/load return
 // a typed ok/kind union (a malformed blob is `invalid_templates`), never a blind throw.
+//
+// NOTE: this is the framework session-rail's template path (framework/src/session/runAgent.ts
+// imports seedTemplates/loadTemplates/renderTemplatesForPrompt/JobTemplate). The APP no longer
+// uses it (the app reads real templates via intakeTemplate.ts + menuOrchestrator.ts); kept
+// here solely for the framework consumer.
 
 import type { IAgentRuntime } from "@elizaos/core";
 
 import type {
   WalrusReadResult,
   WalrusStoreResult,
-} from "../../plugins/plugin-walrus/src/types.js";
+} from "../../../plugins/plugin-walrus/src/types.js";
 
 /** A single conversationally-collected parameter. */
 export interface JobParam {
@@ -86,11 +91,9 @@ export type LoadTemplatesResult =
 
 // --- The Walrus surface this module drives (structural mirror) ---------------
 // Resolved from the booted runtime via getService("walrus"); narrowed to exactly
-// the two methods we call. Mirrors closeSession.ts / recallCheckpoint.ts —
-// app depends on the runtime CONTRACT, not on plugin-walrus's internal
-// class. The locked result TYPES (WalrusStoreResult / WalrusReadResult) are
-// imported from the plugin's types.ts; only the service CLASS is resolved
-// structurally.
+// the two methods we call. App depends on the runtime CONTRACT, not on
+// plugin-walrus's internal class. The locked result TYPES are imported from the
+// plugin's types.ts; only the service CLASS is resolved structurally.
 type WalrusLike = {
   store(bytes: Uint8Array): Promise<WalrusStoreResult>;
   read(blobId: string): Promise<WalrusReadResult>;
@@ -208,12 +211,7 @@ function isValidParam(value: unknown): boolean {
  * Structural validator for ONE template element. The framework consumes
  * Walrus-hosted (untrusted) template blobs, so "is an array" is NOT enough — each
  * element must actually be a JobTemplate or render/match would later throw a raw
- * TypeError PAST the typed-error boundary. Checks exactly the locked shape:
- *   category_id: string, title: string,
- *   params: object of { ask: string, type: "string"|"number"|"duration" } (non-empty),
- *   job_template.output: object of "number"|"string" (non-empty),
- *   job_template.lifetime: string.
- * Pure. Exported so the proof can assert it directly.
+ * TypeError PAST the typed-error boundary. Pure. Exported so the proof can assert it.
  */
 export function isValidTemplate(value: unknown): value is JobTemplate {
   if (!isPlainObject(value)) return false;
@@ -235,12 +233,9 @@ export function isValidTemplate(value: unknown): value is JobTemplate {
 }
 
 /**
- * Decode + parse blob bytes into a JobTemplate[]. Pure (no runtime, no I/O) so it
- * is unit-testable in isolation. A non-JSON payload, a non-array, OR an array whose
- * ANY element is not a well-formed JobTemplate all yield a typed invalid_templates
- * result (NOT a throw, and NOT a deceptive ok:true) — the framework consumes
- * untrusted Walrus blobs, so a structurally-wrong-but-array payload must be caught
- * HERE, at the typed boundary, not later in render/match. Exported for the proof.
+ * Decode + parse blob bytes into a JobTemplate[]. Pure (no runtime, no I/O). A
+ * non-JSON payload, a non-array, OR an array whose ANY element is not a well-formed
+ * JobTemplate all yield a typed invalid_templates result (NOT a throw).
  */
 export function parseTemplates(blobId: string, bytes: Uint8Array): LoadTemplatesResult {
   const invalid = (message: string): LoadTemplatesResult => ({
@@ -263,7 +258,6 @@ export function parseTemplates(blobId: string, bytes: Uint8Array): LoadTemplates
     return invalid(`Templates blob ${blobId} did not contain a JSON array.`);
   }
   // Per-element shape check: a single malformed element invalidates the whole blob.
-  // Naming the offending index keeps the failure diagnosable without leaking content.
   const badIndex = parsed.findIndex((element) => !isValidTemplate(element));
   if (badIndex !== -1) {
     return invalid(
@@ -280,8 +274,7 @@ export function parseTemplates(blobId: string, bytes: Uint8Array): LoadTemplates
 /**
  * Render a compact, READABLE description of each template for injection into the
  * system prompt. This is what the agent reasons over to match and collect
- * parameters. It must NEVER be shown verbatim to the user. LIFTED from
- * demo/src/templates.ts renderTemplatesForPrompt.
+ * parameters. It must NEVER be shown verbatim to the user.
  */
 export function renderTemplatesForPrompt(templates: readonly JobTemplate[]): string {
   return templates
