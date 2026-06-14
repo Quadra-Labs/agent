@@ -22,6 +22,52 @@ const GROQ_ERROR_SENTINEL = "Error generating text. Please try again later.";
 /** The produced job result: an object whose keys/types match job_template.output. */
 export type JobResult = Record<string, string | number>;
 
+/**
+ * An optional, framework-agnostic result producer. When supplied to produceAndSealResult it
+ * REPLACES the default LLM producer — e.g. the price-range example agent supplies a hook that
+ * runs its Pyth skill. The app only calls the callback; it knows nothing about the framework.
+ * The returned result is still validated against the template's output schema before sealing.
+ */
+export type ProduceHook = (args: {
+  readonly template: IntakeTemplate;
+  readonly collected: Record<string, string>;
+}) => Promise<{ ok: true; result: JobResult } | { ok: false; reason: string }>;
+
+/**
+ * The FULL plaintext envelope that gets Seal-encrypted (mirrors the data layer's JobResult).
+ * The validator/scheduler decrypt this and read `job.template`, `agent_result`, `started_at`,
+ * `delivered_at` — so the agent must seal the whole envelope, not just the bare agent_result.
+ */
+export interface JobResultEnvelope {
+  readonly job_id: string;
+  /** The paying user's wallet (in the single-wallet demo, equals the agent). */
+  readonly user: string;
+  /** The agent's wallet. */
+  readonly agent: string;
+  readonly status: "delivered";
+  readonly job: {
+    readonly lifetime: string;
+    readonly template: {
+      readonly id: string;
+      readonly category: string;
+      readonly description: string;
+      readonly output: Record<string, "number" | "string">;
+      readonly evaluator_id: string;
+      readonly start_data_template: Record<string, string>;
+      readonly minimum_lifetime: number;
+      readonly allowed_assets: readonly string[];
+    };
+  };
+  /** What the agent returned (shape matches template.output). */
+  readonly agent_result: JobResult;
+  /** Filled by the evaluation engine at scoring; empty at delivery. */
+  readonly finalized_result: Record<string, unknown>;
+  readonly score: number;
+  /** Job clock start (the on-chain paid_at_ms). */
+  readonly started_at: number;
+  readonly delivered_at: number;
+}
+
 export type ProduceResultResult =
   | { ok: true; result: JobResult }
   // The model call failed outright (empty / groq sentinel). Retryable: a transient LLM
@@ -59,22 +105,13 @@ function buildResultPrompt(
   ].join("\n");
 }
 
-// Parse + validate the model output against job_template.output. Pure. Slices the first
-// {...} span so a fenced/prose-wrapped reply still parses. Any deviation from the schema
-// (parse failure, missing key, extra key, wrong primitive type) -> ok:false invalid.
-function parseResult(
+// Validate an already-parsed object against job_template.output. Pure. Any deviation from the
+// schema (missing key, extra key, wrong primitive type) -> ok:false. Shared by the LLM parser
+// and the produce-hook path so both enforce the exact declared shape.
+function validateResultObject(
   output: IntakeTemplate["output"],
-  raw: string,
+  parsed: unknown,
 ): { ok: true; result: JobResult } | { ok: false; message: string } {
-  const start = raw.indexOf("{");
-  const end = raw.lastIndexOf("}");
-  if (start < 0 || end <= start) return { ok: false, message: "no JSON object in result" };
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw.slice(start, end + 1));
-  } catch {
-    return { ok: false, message: "result was not valid JSON" };
-  }
   if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
     return { ok: false, message: "result was not a JSON object" };
   }
@@ -103,6 +140,24 @@ function parseResult(
     return { ok: false, message: `result has unexpected field(s): ${extra.join(", ")}` };
   }
   return { ok: true, result };
+}
+
+// Parse + validate the model output against job_template.output. Pure. Slices the first
+// {...} span so a fenced/prose-wrapped reply still parses, then validates the object.
+function parseResult(
+  output: IntakeTemplate["output"],
+  raw: string,
+): { ok: true; result: JobResult } | { ok: false; message: string } {
+  const start = raw.indexOf("{");
+  const end = raw.lastIndexOf("}");
+  if (start < 0 || end <= start) return { ok: false, message: "no JSON object in result" };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw.slice(start, end + 1));
+  } catch {
+    return { ok: false, message: "result was not valid JSON" };
+  }
+  return validateResultObject(output, parsed);
 }
 
 /**
@@ -164,8 +219,8 @@ export interface SealEncryptInput {
   readonly keyServerIds: readonly string[];
   /** TSS threshold (config.sealThreshold). */
   readonly threshold: number;
-  /** The result to encrypt (serialized to JSON bytes). */
-  readonly result: JobResult;
+  /** The value to encrypt (serialized to JSON bytes) — the full JobResultEnvelope. */
+  readonly result: unknown;
   /** Sui network for the read-only JSON-RPC client the SealClient needs. */
   readonly network: "testnet" | "mainnet" | "devnet" | "localnet";
 }
@@ -265,6 +320,19 @@ export interface SealResultInput {
   readonly threshold: number;
   /** Sui network for the read-only client the SealClient needs. */
   readonly network: "testnet" | "mainnet" | "devnet" | "localnet";
+  /** Optional producer that REPLACES the default LLM producer (e.g. the Pyth price-range
+   * skill). Its result is still validated against template.output before sealing. */
+  readonly produce?: ProduceHook;
+  /** The agent's wallet (envelope `agent`). */
+  readonly agentAddress: string;
+  /** The paying user's wallet (envelope `user`); equals the agent in the single-wallet demo. */
+  readonly userAddress: string;
+  /** The user-chosen lifetime, e.g. "5m" (envelope `job.lifetime`). */
+  readonly lifetime: string;
+  /** The job clock start = on-chain paid_at_ms (envelope `started_at`). */
+  readonly startedAtMs: number;
+  /** Injectable clock for delivered_at (tests). Defaults to Date.now. */
+  readonly now?: () => number;
 }
 
 export type ProduceAndSealResult =
@@ -295,15 +363,70 @@ export async function produceAndSealResult(
     };
   }
 
-  const produced = await produceResult(runtime, input.template, input.collected);
-  if (!produced.ok) return produced;
+  // Produce via the injected hook (e.g. the Pyth price-range skill) when present, else the
+  // default LLM producer. Either way the result is validated against template.output.
+  let result: JobResult;
+  if (input.produce !== undefined) {
+    const produced = await input.produce({ template: input.template, collected: input.collected });
+    if (!produced.ok) {
+      return {
+        ok: false,
+        kind: "model_error",
+        errorName: "ProducerError",
+        message: produced.reason,
+        retryable: true,
+      };
+    }
+    const validated = validateResultObject(input.template.output, produced.result);
+    if (!validated.ok) {
+      return {
+        ok: false,
+        kind: "invalid_result",
+        errorName: "InvalidResult",
+        message: validated.message,
+        retryable: false,
+      };
+    }
+    result = validated.result;
+  } else {
+    const produced = await produceResult(runtime, input.template, input.collected);
+    if (!produced.ok) return produced;
+    result = produced.result;
+  }
+
+  // Wrap the produced agent_result in the FULL envelope the validator/scheduler decrypt + read.
+  const t = input.template;
+  const envelope: JobResultEnvelope = {
+    job_id: input.jobId,
+    user: input.userAddress,
+    agent: input.agentAddress,
+    status: "delivered",
+    job: {
+      lifetime: input.lifetime,
+      template: {
+        id: t.id,
+        category: t.category,
+        description: t.description,
+        output: t.output,
+        evaluator_id: t.evaluator_id,
+        start_data_template: {},
+        minimum_lifetime: t.minimumLifetimeMs ?? 0,
+        allowed_assets: t.allowedAssets ?? [],
+      },
+    },
+    agent_result: result,
+    finalized_result: {},
+    score: 0,
+    started_at: input.startedAtMs,
+    delivered_at: (input.now ?? Date.now)(),
+  };
 
   const encrypted = await sealEncryptResult({
     jobId: input.jobId,
     packageId: input.packageId,
     keyServerIds: input.keyServerIds,
     threshold: input.threshold,
-    result: produced.result,
+    result: envelope,
     network: input.network,
   });
   if (!encrypted.ok) return encrypted;

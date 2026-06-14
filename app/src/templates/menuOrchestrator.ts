@@ -93,7 +93,11 @@ function intakeToMenuTemplate(t: IntakeTemplate): MenuTemplate {
       ]),
     ),
     output: t.output,
-    lifetime: t.lifetime,
+    // Carry lifetime / minimum_lifetime / allowed_assets so a cache-served menu round-trips them
+    // (menuToIntake re-parses via parseIntakeTemplates, which reads these snake_case fields).
+    ...(t.lifetime !== undefined ? { lifetime: t.lifetime } : {}),
+    ...(t.minimumLifetimeMs !== undefined ? { minimum_lifetime: t.minimumLifetimeMs } : {}),
+    ...(t.allowedAssets && t.allowedAssets.length > 0 ? { allowed_assets: t.allowedAssets } : {}),
   };
 }
 

@@ -16,7 +16,14 @@ export interface MenuTemplate {
     { ask: string; type: string; validation?: Record<string, unknown> }
   >;
   readonly output: Record<string, string>;
-  readonly lifetime: string;
+  /** Optional fixed validity window; newer templates omit it in favour of minimum_lifetime. */
+  readonly lifetime?: string;
+  /** Optional minimum lifetime (ms); carried so a cache-served menu still enforces the floor on
+   * the user's chosen lifetime. */
+  readonly minimum_lifetime?: number;
+  /** The assets a job may target; carried so a cache-served menu still constrains the asset
+   * the agent commits to. Absent for a template that does not declare it. */
+  readonly allowed_assets?: readonly string[];
 }
 
 /** One self-selection decision, cached for debuggability / scoring disputes. */
@@ -70,7 +77,8 @@ function isMenuTemplate(value: unknown): value is MenuTemplate {
   if (!isPlainObject(value)) return false;
   if (typeof value.id !== "string" || typeof value.category !== "string") return false;
   if (typeof value.evaluator_id !== "string" || typeof value.description !== "string") return false;
-  if (typeof value.lifetime !== "string") return false;
+  // lifetime is optional now (templates may declare minimum_lifetime and let the user pick).
+  if (value.lifetime !== undefined && typeof value.lifetime !== "string") return false;
   if (!isPlainObject(value.params) || !isPlainObject(value.output)) return false;
   return Object.values(value.params).every(
     (p) => isPlainObject(p) && typeof p.ask === "string" && typeof p.type === "string",

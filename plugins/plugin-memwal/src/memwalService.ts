@@ -11,6 +11,7 @@ import type { IAgentRuntime } from "@elizaos/core";
 import { CheckpointIndex } from "./checkpointIndex.js";
 import type { CheckpointIndexRecord } from "./checkpointIndex.js";
 import { MenuIndex } from "./menuIndex.js";
+import { DraftIndex } from "./draftIndex.js";
 import type {
   Checkpoint,
   MemwalSeam,
@@ -19,6 +20,8 @@ import type {
 } from "./types.js";
 import { isMenuRecord } from "./menuTypes.js";
 import type { MenuRecord, ReadMenuResult, WriteMenuResult } from "./menuTypes.js";
+import { isJobDraftRecord } from "./draftTypes.js";
+import type { JobDraftRecord, ReadDraftResult, WriteDraftResult } from "./draftTypes.js";
 
 // The Walrus serviceType MemWal resolves (mirrors WalrusService.serviceType).
 const WALRUS_SERVICE_TYPE = "walrus";
@@ -110,6 +113,10 @@ export class MemwalService extends Service {
   // namespace) so the job-template menu cache never collides with checkpoints.
   private menuIndexCache: MenuIndex | undefined;
 
+  // The SQLite-backed JOB-DRAFT index, a third private collaborator (distinct table +
+  // namespace) so the in-conversation job draft never collides with checkpoints or menus.
+  private draftIndexCache: DraftIndex | undefined;
+
   // PRIVATE constructor: construction goes through start()/fromConfig() only. A
   // function seam cannot round-trip through runtime string settings, so the seam
   // is injected via fromConfig (same reasoning as walrus's signer). NO network I/O.
@@ -174,6 +181,18 @@ export class MemwalService extends Service {
       this.menuIndexCache = new MenuIndex(runtime);
     }
     return this.menuIndexCache;
+  }
+
+  // Resolve (lazily build) the JOB-DRAFT index. Same lifecycle as the menu index but a
+  // distinct collaborator (its own table + namespace). Returns undefined only if the service
+  // has no runtime.
+  private resolveDraftIndex(): DraftIndex | undefined {
+    const runtime = this.runtime as IAgentRuntime | undefined;
+    if (runtime === undefined) return undefined;
+    if (this.draftIndexCache === undefined) {
+      this.draftIndexCache = new DraftIndex(runtime);
+    }
+    return this.draftIndexCache;
   }
 
   // --- Index read methods (public; no public mutator) ------------------------
@@ -495,6 +514,90 @@ export class MemwalService extends Service {
       return { ok: true, menu: parsed };
     } catch (err) {
       return { ok: false, kind: "invalid_menu", blobId, errorName: errorNameOf(err), message: messageOf(err), retryable: false };
+    }
+  }
+
+  // --- Job-draft operations (additive; checkpoint + menu paths above are untouched) -------
+  // The agent's in-conversation "knowledge pool" for one job in flight: the chosen template,
+  // the params collected so far, readiness, and the minted session. The readiness check reads
+  // this back (across turns / restarts) rather than re-deriving from the transcript alone.
+
+  // writeDraft: JSON-encode -> (optional encrypt seam) -> walrus.store -> self-record into the
+  // DRAFT index. Mirrors writeMenu's best-effort indexing: the blob is durable on ok:true
+  // regardless of whether the index entry landed (`indexed` reports it). NEVER throws.
+  async writeDraft(draft: JobDraftRecord): Promise<WriteDraftResult> {
+    const walrus = this.resolveWalrus();
+    if (walrus === undefined) {
+      return {
+        ok: false,
+        kind: "config_error",
+        errorName: "MemwalConfigError",
+        message: "walrus service is not registered",
+        retryable: false,
+      };
+    }
+
+    const plain = encoder.encode(JSON.stringify(draft));
+    const bytes = this.cfg.seam.encrypt ? await this.cfg.seam.encrypt(plain) : plain;
+
+    const result = await walrus.store(bytes);
+    if (result.ok) {
+      const index = this.resolveDraftIndex();
+      let indexed = false;
+      if (index !== undefined) {
+        try {
+          await index.record({ agent: draft.agent, room: draft.room, blobId: result.blobId });
+          indexed = true;
+        } catch (err) {
+          const note = `memwal: draft blob ${result.blobId} is durable but its index entry for (agent=${draft.agent}, room=${draft.room}) failed to record: ${messageOf(err)}`;
+          const logger = (this.runtime as IAgentRuntime | undefined)?.logger;
+          if (logger?.warn) logger.warn({ blobId: result.blobId, agent: draft.agent, room: draft.room }, note);
+          else if (typeof console !== "undefined" && typeof console.warn === "function") console.warn(note);
+        }
+      }
+      return { ok: true, blobId: result.blobId, indexed };
+    }
+    if (result.kind === "network_error") {
+      return { ok: false, kind: "network_error", errorName: result.errorName, message: result.message, retryable: true };
+    }
+    return { ok: false, kind: "config_error", errorName: result.errorName, message: result.message, retryable: false };
+  }
+
+  // readLatestDraft: resolve the newest draft blobId for an (agent, room) pair, read it back
+  // through Walrus + the optional decrypt seam, and validate. not_found when no entry;
+  // invalid_draft for a blob that read back malformed; Walrus failure kinds pass through.
+  // NEVER throws.
+  async readLatestDraft(agent: string, room: string): Promise<ReadDraftResult> {
+    const walrus = this.resolveWalrus();
+    if (walrus === undefined) {
+      return { ok: false, kind: "config_error", errorName: "MemwalConfigError", message: "walrus service is not registered", retryable: false };
+    }
+    const index = this.resolveDraftIndex();
+    const blobId = index !== undefined ? await index.latest(agent, room) : undefined;
+    if (blobId === undefined) {
+      return { ok: false, kind: "not_found", message: `no job draft for (agent ${agent}, room ${room})` };
+    }
+
+    const result = await walrus.read(blobId);
+    if (!result.ok) {
+      if (result.kind === "blob_unavailable") {
+        return { ok: false, kind: "blob_unavailable", blobId, errorName: result.errorName, message: result.message, retryable: false };
+      }
+      if (result.kind === "network_error") {
+        return { ok: false, kind: "network_error", errorName: result.errorName, message: result.message, retryable: true };
+      }
+      return { ok: false, kind: "config_error", errorName: result.errorName, message: result.message, retryable: false };
+    }
+
+    try {
+      const bytes = this.cfg.seam.decrypt ? await this.cfg.seam.decrypt(result.bytes) : result.bytes;
+      const parsed: unknown = JSON.parse(decoder.decode(bytes));
+      if (!isJobDraftRecord(parsed)) {
+        return { ok: false, kind: "invalid_draft", blobId, errorName: "InvalidDraftError", message: `Draft blob ${blobId} is missing or has malformed fields.`, retryable: false };
+      }
+      return { ok: true, draft: parsed };
+    } catch (err) {
+      return { ok: false, kind: "invalid_draft", blobId, errorName: errorNameOf(err), message: messageOf(err), retryable: false };
     }
   }
 }

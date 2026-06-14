@@ -17,6 +17,9 @@ export interface RegisterSealedResultInput {
   readonly jobId: string;
   /** The Seal ciphertext bytes (from sealEncryptResult). Base64-encoded here. */
   readonly ciphertext: Uint8Array;
+  /** Abort timeout in ms. The gateway writes the blob to Walrus synchronously (tens of
+   * seconds on testnet), so this must be generous; defaults to 90s here. */
+  readonly timeoutMs?: number;
   readonly now?: () => number;
 }
 
@@ -46,6 +49,7 @@ export async function registerSealedResult(
       job_id: input.jobId,
       enc: Buffer.from(input.ciphertext).toString("base64"),
     },
+    timeoutMs: input.timeoutMs ?? 90_000,
     now: input.now,
   });
   if (!res.ok) return res; // network_error passes straight through

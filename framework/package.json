@@ -6,12 +6,7 @@
   "description": "Developer Agent Framework: sealed memory rails + (later) skills/onTurn over the ElizaOS agent runtime.",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "chat:example": "tsx examples/chat.ts",
-    "chat:pokemon": "tsx examples/chat.ts --agent pokemon",
-    "chat:btc": "tsx examples/chat.ts --agent btc",
-    "chat:saturation": "tsx examples/chat.ts --agent saturation",
-    "chat:snipe": "tsx examples/chat.ts --agent snipe",
-    "chat:forecast": "tsx examples/chat.ts --agent forecast"
+    "example:price-range": "tsx examples/run.ts"
   },
   "dependencies": {
     "@elizaos/core": "^1.7.2",

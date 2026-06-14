@@ -50,6 +50,12 @@ export interface AgentConfig {
   readonly groqLargeModel: string;
   /** Small text model id. */
   readonly groqSmallModel: string;
+  /** OPTIONAL OpenAI API key. When present, the runtime uses plugin-openai for text models
+   * instead of Groq (higher rate limits). Absent -> Groq. NEVER logged. */
+  readonly openaiApiKey: string | undefined;
+  /** OpenAI large/small model ids (used only when openaiApiKey is set). */
+  readonly openaiLargeModel: string;
+  readonly openaiSmallModel: string;
   /** PGlite data directory (the local "SQLite" DB) under app/.eliza-db. */
   readonly dbDir: string;
   /** Walrus network. A3 uses testnet (the only value the service accepts). */
@@ -84,6 +90,12 @@ export interface AgentConfig {
   readonly sealThreshold: number;
   /** Intake-engine base URL the agent submits/delivers jobs to (env INTAKE_URL). */
   readonly intakeUrl: string;
+  /**
+   * Intake-engine socket origin the agent connects to for the real-time `job_paid` push
+   * (env INTAKE_SOCKET_URL). Defaults to `intakeUrl` since socket.io shares the HTTP port,
+   * so an existing single-URL setup needs no new env.
+   */
+  readonly intakeSocketUrl: string;
   /** Data-gateway base URL the agent registers sealed results with (env DATA_GATEWAY_URL). */
   readonly dataGatewayUrl: string;
   /**
@@ -145,6 +157,9 @@ export function loadAgentConfig(env: NodeJS.ProcessEnv = process.env): AgentConf
     groqApiKey: readTrimmed(env, "GROQ_API_KEY"),
     groqLargeModel: readTrimmed(env, "GROQ_LARGE_MODEL") ?? DEFAULT_LARGE_MODEL,
     groqSmallModel: readTrimmed(env, "GROQ_SMALL_MODEL") ?? DEFAULT_SMALL_MODEL,
+    openaiApiKey: readTrimmed(env, "OPENAI_API_KEY"),
+    openaiLargeModel: readTrimmed(env, "OPENAI_LARGE_MODEL") ?? "gpt-4o-mini",
+    openaiSmallModel: readTrimmed(env, "OPENAI_SMALL_MODEL") ?? "gpt-4o-mini",
     dbDir: resolve(appRoot, ".eliza-db"),
     walrusNetwork: readTrimmed(env, "WALRUS_NETWORK") ?? DEFAULT_WALRUS_NETWORK,
     walrusSuiRpcUrl: readTrimmed(env, "SUI_RPC_URL") ?? "",
@@ -159,6 +174,8 @@ export function loadAgentConfig(env: NodeJS.ProcessEnv = process.env): AgentConf
     sealKeyServerIds: readCsv(env, "SEAL_KEY_SERVER_IDS", DEFAULT_SEAL_KEY_SERVER_IDS),
     sealThreshold: readPositiveInt(env, "SEAL_THRESHOLD", DEFAULT_SEAL_THRESHOLD),
     intakeUrl: readTrimmed(env, "INTAKE_URL") ?? DEFAULT_INTAKE_URL,
+    intakeSocketUrl:
+      readTrimmed(env, "INTAKE_SOCKET_URL") ?? readTrimmed(env, "INTAKE_URL") ?? DEFAULT_INTAKE_URL,
     dataGatewayUrl: readTrimmed(env, "DATA_GATEWAY_URL") ?? DEFAULT_DATA_GATEWAY_URL,
     agentSignerKey: readTrimmed(env, "AGENT_SECRET_KEY") ?? readTrimmed(env, "WALRUS_SIGNER_KEY"),
   };

@@ -7,6 +7,7 @@
 import { AgentRuntime, ModelType, stringToUuid } from "@elizaos/core";
 import type { IAgentRuntime, IDatabaseAdapter } from "@elizaos/core";
 import groqPlugin from "@elizaos/plugin-groq";
+import openaiPlugin from "@elizaos/plugin-openai";
 import sqlPlugin, { createDatabaseAdapter } from "@elizaos/plugin-sql";
 
 import { walrusPluginWithSigner } from "./walrusPluginWithSigner.js";
@@ -124,10 +125,20 @@ export async function createAgentRuntime(
   // custom character boots a DISTINCT identity (and resolves its own checkpoints).
   const agentId = stringToUuid(character.name);
 
-  // plugin-groq THROWS at init without a key (verified live), so a missing key gets a
-  // boot-only placeholder (precedent: demo/src/smoke.ts). Real groq CALLS would 401;
-  // an agent with a provider chain never makes one.
+  // Text-model provider: prefer OpenAI when its key is set (higher rate limits), else Groq.
+  // plugin-groq THROWS at init without a key, so a missing groq key gets a boot-only
+  // placeholder. The local embedding handler (registered below) wins regardless of provider,
+  // so no embedding API key is needed either way.
+  const useOpenai = config.openaiApiKey !== undefined && config.openaiApiKey.length > 0;
   const effectiveGroqKey = config.groqApiKey ?? "gsk_boot_only_placeholder";
+  const modelPlugin = useOpenai ? openaiPlugin : groqPlugin;
+  const modelPluginName = useOpenai ? "@elizaos/plugin-openai" : "@elizaos/plugin-groq";
+  const modelSettings: Record<string, string> = useOpenai
+    ? { OPENAI_LARGE_MODEL: config.openaiLargeModel, OPENAI_SMALL_MODEL: config.openaiSmallModel }
+    : { GROQ_LARGE_MODEL: config.groqLargeModel, GROQ_SMALL_MODEL: config.groqSmallModel };
+  const modelSecret: Record<string, string> = useOpenai
+    ? { OPENAI_API_KEY: config.openaiApiKey as string }
+    : { GROQ_API_KEY: effectiveGroqKey };
 
   // Only set WALRUS_SIGNER_KEY in settings when present, so its absence is a clean
   // "undefined" the service treats as read-only. The secret is never logged.
@@ -145,25 +156,24 @@ export async function createAgentRuntime(
     bio: [...character.bio],
     plugins: [
       "@elizaos/plugin-sql",
-      "@elizaos/plugin-groq",
+      modelPluginName,
       "plugin-walrus",
       "plugin-memwal",
     ],
     settings: {
-      GROQ_LARGE_MODEL: config.groqLargeModel,
-      GROQ_SMALL_MODEL: config.groqSmallModel,
+      ...modelSettings,
       ...walrusSettings,
-      secrets: { GROQ_API_KEY: effectiveGroqKey },
+      secrets: { ...modelSecret },
     },
   };
 
   const runtime = new AgentRuntime({
     character: elizaCharacter,
     agentId,
-    // Plugin objects passed directly (no registry resolution). SQL first; Walrus
-    // before MemWal so MemwalService can resolve the live WalrusService.
-    plugins: [sqlPlugin, groqPlugin, walrusPluginWithSigner, memwalPlugin],
-    settings: { GROQ_API_KEY: effectiveGroqKey },
+    // Plugin objects passed directly (no registry resolution). SQL first; the chosen text-model
+    // plugin (openai or groq); Walrus before MemWal so MemwalService resolves the live Walrus.
+    plugins: [sqlPlugin, modelPlugin, walrusPluginWithSigner, memwalPlugin],
+    settings: { ...modelSecret },
   });
 
   // Deterministic local embedding handler, high priority so it wins over defaults.
@@ -184,7 +194,7 @@ export async function createAgentRuntime(
   await adapter.init();
   const schemaPlugins: SchemaPlugin[] = [
     sqlPlugin as unknown as SchemaPlugin,
-    groqPlugin as unknown as SchemaPlugin,
+    modelPlugin as unknown as SchemaPlugin,
     walrusPluginWithSigner as unknown as SchemaPlugin,
     memwalPlugin as unknown as SchemaPlugin,
   ];

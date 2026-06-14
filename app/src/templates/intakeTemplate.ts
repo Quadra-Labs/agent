@@ -39,8 +39,16 @@ export interface IntakeTemplate {
   readonly params: Record<string, IntakeParam>;
   /** The result schema the agent must produce; NON-empty. */
   readonly output: Record<string, "number" | "string">;
-  /** The job's validity window, e.g. "5m". */
-  readonly lifetime: string;
+  /** Optional fixed validity window, e.g. "5m". Newer templates omit this and instead declare
+   * `minimumLifetimeMs`, letting the USER choose the lifetime (>= the minimum) per job. */
+  readonly lifetime?: string;
+  /** Optional minimum lifetime in ms (from the data-layer `minimum_lifetime`). When set, the
+   * user-provided lifetime must parse to at least this; the agent rejects shorter windows. */
+  readonly minimumLifetimeMs?: number;
+  /** The asset symbols a job may target (e.g. ["BTC","ETH"]). The intake engine REQUIRES the
+   * submitted asset to be one of these, so the agent must pick from this list. Absent for an
+   * older template that does not declare it (then the agent passes the asset through as-is). */
+  readonly allowedAssets?: readonly string[];
 }
 
 export interface SkippedTemplate {
@@ -163,7 +171,6 @@ function coerceIntakeTemplate(
   if (!isNonEmptyString(value.evaluator_id)) return { ok: false, reason: "missing non-empty evaluator_id" };
   if (!isNonEmptyString(value.category)) return { ok: false, reason: "missing non-empty category" };
   if (!isNonEmptyString(value.description)) return { ok: false, reason: "missing non-empty description" };
-  if (!isNonEmptyString(value.lifetime)) return { ok: false, reason: "missing non-empty lifetime" };
 
   const params = normalizeParams(value.params);
   if (!params.ok) return params;
@@ -175,6 +182,23 @@ function coerceIntakeTemplate(
     return { ok: false, reason: "output has a non-number|string type" };
   }
 
+  // Optional `allowed_assets` (new data-layer field): the assets a job may target. Parsed
+  // leniently into non-empty strings; a malformed value is treated as absent (not a skip) so
+  // an older template without it still offers. When present, the lifecycle constrains the
+  // submitted asset to this list (the engine validates it too).
+  const allowedAssets = Array.isArray(value.allowed_assets)
+    ? value.allowed_assets.filter((a): a is string => typeof a === "string" && a.trim().length > 0)
+    : undefined;
+
+  // Optional fixed `lifetime` (legacy) and optional `minimum_lifetime` (ms, new data-layer
+  // field). A template needs neither — the user picks the lifetime at runtime — but when
+  // minimum_lifetime is set the lifecycle enforces the user's choice is at least that long.
+  const lifetime = isNonEmptyString(value.lifetime) ? value.lifetime : undefined;
+  const minimumLifetimeMs =
+    typeof value.minimum_lifetime === "number" && Number.isFinite(value.minimum_lifetime) && value.minimum_lifetime > 0
+      ? value.minimum_lifetime
+      : undefined;
+
   return {
     ok: true,
     template: {
@@ -184,7 +208,9 @@ function coerceIntakeTemplate(
       description: value.description,
       params: params.params,
       output: value.output as Record<string, "number" | "string">,
-      lifetime: value.lifetime,
+      ...(lifetime !== undefined ? { lifetime } : {}),
+      ...(minimumLifetimeMs !== undefined ? { minimumLifetimeMs } : {}),
+      ...(allowedAssets && allowedAssets.length > 0 ? { allowedAssets } : {}),
     },
   };
 }
@@ -285,13 +311,35 @@ export function renderIntakeTemplatesForPrompt(templates: readonly IntakeTemplat
       const output = Object.entries(tpl.output)
         .map(([name, type]) => `${name} (${type})`)
         .join(", ");
+      const lifetimeLine =
+        tpl.lifetime !== undefined
+          ? `     Validity window: ${tpl.lifetime}`
+          : tpl.minimumLifetimeMs !== undefined
+            ? `     Lifetime: the user picks it; minimum ${Math.round(tpl.minimumLifetimeMs / 1000)}s (reject anything shorter)`
+            : `     Lifetime: the user picks it`;
       return [
         `  ${index + 1}. ${tpl.description} [id: ${tpl.id}]`,
         `     Parameters to collect:`,
         questions,
         `     Produces: ${output}`,
-        `     Validity window: ${tpl.lifetime}`,
+        lifetimeLine,
+        ...(tpl.allowedAssets && tpl.allowedAssets.length > 0
+          ? [`     Assets you can take (pick exactly one): ${tpl.allowedAssets.join(", ")}`]
+          : []),
       ].join("\n");
     })
     .join("\n\n");
+}
+
+/**
+ * Parse a lifetime/duration string like "5m" / "30s" / "2h" / "1d" into milliseconds, or
+ * undefined when it is malformed. Mirrors the intake engine's parseLifetimeMs so the agent
+ * validates the user's lifetime the same way the server will (>= a template's minimum). PURE.
+ */
+export function parseDurationMs(value: string): number | undefined {
+  const m = /^(\d+)\s*(s|m|h|d)$/.exec(value.trim());
+  if (!m) return undefined;
+  const n = Number(m[1]);
+  const unit = { s: 1000, m: 60_000, h: 3_600_000, d: 86_400_000 }[m[2] as "s" | "m" | "h" | "d"];
+  return n * unit;
 }

@@ -49,9 +49,19 @@ export class WalrusService extends Service {
     // walrus types do not declare that; the documented cast bridges it. Never a
     // switch to GraphQL.
     this.suiClient = new SuiJsonRpcClient({ url: cfg.suiRpcUrl, network: cfg.network });
+    // Upload through the Walrus UPLOAD RELAY (seconds) instead of direct storage-node uploads
+    // (tens of seconds, hang-prone on testnet). Defaults to Mysten's testnet relay; override the
+    // host with WALRUS_UPLOAD_RELAY_HOST (set "" to use direct uploads). The relay charges a
+    // small WAL tip per blob (testnet: a const ~105 FROST); sendTip.max caps it.
+    const relayEnv = process.env.WALRUS_UPLOAD_RELAY_HOST;
+    const relayHost = (relayEnv ?? "https://upload-relay.testnet.walrus.space").trim();
+    const relayMaxTip = Number(process.env.WALRUS_UPLOAD_RELAY_MAX_TIP ?? 1_000_000);
     this.walrusClient = new WalrusClient({
       network: cfg.network,
       suiClient: this.suiClient as unknown as ClientWithCoreApi,
+      ...(relayHost.length > 0
+        ? { uploadRelay: { host: relayHost, sendTip: { max: relayMaxTip } } }
+        : {}),
     });
   }
 

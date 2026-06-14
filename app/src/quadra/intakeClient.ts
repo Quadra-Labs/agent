@@ -60,6 +60,8 @@ export interface SubmitJobInput {
   readonly templateId: string;
   readonly lifetime: string;
   readonly cost: number;
+  /** The asset the job targets (e.g. "BTC"); must be allowed by the template. */
+  readonly asset: string;
   readonly now?: () => number;
 }
 
@@ -67,6 +69,9 @@ export interface DeliverJobInput {
   readonly baseUrl: string;
   readonly signer: Signer;
   readonly jobId: string;
+  /** Abort timeout in ms. /deliver runs the validator (Seal decrypt + eval) and the on-chain
+   * release, which takes tens of seconds, so this must be generous; defaults to 90s. */
+  readonly timeoutMs?: number;
   readonly now?: () => number;
 }
 
@@ -130,7 +135,12 @@ export async function submitJob(input: SubmitJobInput): Promise<SubmitJobResult>
     signer: input.signer,
     baseUrl: input.baseUrl,
     path: "/jobs",
-    payload: { template_id: input.templateId, lifetime: input.lifetime, cost: input.cost },
+    payload: {
+      template_id: input.templateId,
+      lifetime: input.lifetime,
+      cost: input.cost,
+      asset: input.asset,
+    },
     now: input.now,
   });
   if (!res.ok) return res; // network_error passes straight through
@@ -163,6 +173,7 @@ export async function deliverJob(input: DeliverJobInput): Promise<DeliverJobResu
     baseUrl: input.baseUrl,
     path: "/deliver",
     payload: { job_id: input.jobId },
+    timeoutMs: input.timeoutMs ?? 90_000,
     now: input.now,
   });
   if (!res.ok) return res;
