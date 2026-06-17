@@ -6,7 +6,10 @@
   "description": "Developer Agent Framework: sealed memory rails + (later) skills/onTurn over the ElizaOS agent runtime.",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "example:price-range": "tsx examples/run.ts"
+    "example:price-range": "tsx examples/run.ts",
+    "example:poly-resolution": "tsx examples/runPolymarketResolution.ts",
+    "example:poly-event": "tsx examples/runPolymarketEvent.ts",
+    "example:poly-price": "tsx examples/runPolymarketPrice.ts"
   },
   "dependencies": {
     "@elizaos/core": "^1.7.2",

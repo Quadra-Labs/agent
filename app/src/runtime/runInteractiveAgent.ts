@@ -25,6 +25,13 @@ import {
   type IntakeSocketHandle,
   type JobPaidEvent,
 } from "../quadra/intakeSocket.js";
+import {
+  connectCompetitionSocket,
+  type CompetitionSocketHandle,
+  type CompetitionJobEvent,
+} from "../quadra/competitionSocket.js";
+import { runCompetitionJob } from "../jobs/competitionJob.js";
+import { joinCompetition } from "../quadra/joinCompetition.js";
 import type { AgentCharacter } from "../character/character.js";
 import { resolveMenu } from "../templates/menuOrchestrator.js";
 import type { IntakeTemplate } from "../templates/intakeTemplate.js";
@@ -49,9 +56,15 @@ const HELP = [
   "Commands:",
   "  /close            checkpoint this session to Walrus (live) and clear recalled context",
   "  /resume           re-recall the latest checkpoint for this (user, agent)",
+  "  /join <id>        enrol in a competition on-chain (then receive free jobs)",
   "  /help             show this help",
   "  /exit             quit (does NOT auto-checkpoint; run /close first to persist)",
 ].join("\n");
+
+// Narrow the free-form config.walrusNetwork to the Sui client's network union.
+function narrowNetwork(n: string): "testnet" | "mainnet" | "devnet" | "localnet" {
+  return n === "mainnet" || n === "devnet" || n === "localnet" ? n : "testnet";
+}
 
 // Render a background delivery-poll outcome into a user-facing line.
 function describeDeliveryOutcome(outcome: DeliveryOutcome, session: IntakeSession): string {
@@ -159,6 +172,7 @@ export async function runInteractiveAgent(opts: RunInteractiveAgentOptions): Pro
   let jobState: JobState = { phase: "idle" };
   let deliveryPoll: DeliveryPollHandle | undefined;
   let intakeSocket: IntakeSocketHandle | undefined;
+  let competitionSocket: CompetitionSocketHandle | undefined;
 
   console.log("");
   console.log(HELP);
@@ -173,6 +187,7 @@ export async function runInteractiveAgent(opts: RunInteractiveAgentOptions): Pro
     stopping = true;
     deliveryPoll?.cancel();
     intakeSocket?.cancel();
+    competitionSocket?.cancel();
     rl.close();
     await handle.stop();
     process.exit(code);
@@ -322,6 +337,66 @@ export async function runInteractiveAgent(opts: RunInteractiveAgentOptions): Pro
     });
   }
 
+  // Competition mode: accept FREE competition jobs over a SEPARATE socket, independent of the
+  // paid lifecycle. This path NEVER touches jobState, so the payment-first flow is unchanged.
+  const handledCompetitionJobs = new Set<string>();
+  const handleCompetitionJob = async (event: CompetitionJobEvent): Promise<void> => {
+    if (handledCompetitionJobs.has(event.job_id)) return; // already working/done this job
+    handledCompetitionJobs.add(event.job_id);
+    if (lifecycleSigner === undefined) return;
+    console.log(
+      `[competition] Free job ${event.job_id} (competition ${event.competition_id}, kind ${event.kind}); working...`,
+    );
+    const outcome = await runCompetitionJob({
+      runtime: handle.runtime,
+      config,
+      signer: lifecycleSigner,
+      event,
+      ...(opts.produce !== undefined ? { produce: opts.produce } : {}),
+    });
+    if (outcome.ok) {
+      console.log(
+        `[competition] Delivered ${outcome.jobId} (blob ${outcome.blobId}); the engine scores it at lifetime end.`,
+      );
+    } else {
+      console.log(`[competition] Job ${event.job_id} not delivered (${outcome.kind}): ${outcome.message}`);
+      // Allow a re-push to retry only when the failure is retryable.
+      if (outcome.retryable !== false) handledCompetitionJobs.delete(event.job_id);
+    }
+  };
+
+  const doJoin = async (competitionId: string): Promise<void> => {
+    if (lifecycleSigner === undefined) {
+      console.log("Cannot join: no usable agent signer (set AGENT_SECRET_KEY / WALRUS_SIGNER_KEY).");
+      return;
+    }
+    const res = await joinCompetition({
+      signer: lifecycleSigner,
+      network: narrowNetwork(config.walrusNetwork),
+      quadraPackageId: config.quadraPackageId ?? "",
+      agentRegistryId: config.agentRegistryId ?? "",
+      competitionId,
+    });
+    if (res.ok) console.log(`[competition] Joined ${competitionId} (tx ${res.digest}).`);
+    else console.log(`[competition] Join failed (${res.kind}): ${res.message}`);
+  };
+
+  if (config.competitionEnabled && lifecycleSigner !== undefined) {
+    competitionSocket = connectCompetitionSocket({
+      baseUrl: config.competitionSocketUrl,
+      signer: lifecycleSigner,
+      onStatus: (note) => console.log(`[competition] ${note}`),
+      onCompetitionJob: (event) => void handleCompetitionJob(event),
+    });
+    console.log(`Competition mode on: listening for free jobs at ${config.competitionSocketUrl}.`);
+    if (config.competitionId !== undefined) {
+      console.log(`Auto-joining competition ${config.competitionId}...`);
+      await doJoin(config.competitionId);
+    }
+  } else if (config.competitionEnabled) {
+    console.warn("(competition mode requested but disabled: agent signer unparseable)");
+  }
+
   prompt();
   rl.prompt();
 
@@ -355,6 +430,20 @@ export async function runInteractiveAgent(opts: RunInteractiveAgentOptions): Pro
         await doResume();
       } catch (err) {
         console.error(`/resume error: ${errorDetail(err)}`);
+      }
+      rl.prompt();
+      return;
+    }
+    if (text === "/join" || text.startsWith("/join ")) {
+      const id = text.slice("/join".length).trim();
+      if (id.length === 0) {
+        console.log("Usage: /join <competitionId>");
+      } else {
+        try {
+          await doJoin(id);
+        } catch (err) {
+          console.error(`/join error: ${errorDetail(err)}`);
+        }
       }
       rl.prompt();
       return;

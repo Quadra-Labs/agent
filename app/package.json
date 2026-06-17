@@ -7,7 +7,9 @@
   "scripts": {
     "chat": "tsx src/runtime/cli.ts",
     "typecheck": "tsc --noEmit",
-    "seed:template": "tsx src/templates/seedTemplate.ts"
+    "seed:template": "tsx src/templates/seedTemplate.ts",
+    "register": "tsx src/runtime/registerAgent.ts",
+    "join": "tsx src/runtime/joinCompetitionCli.ts"
   },
   "dependencies": {
     "@elizaos/core": "^1.7.2",

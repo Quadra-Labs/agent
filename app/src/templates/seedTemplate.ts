@@ -8,21 +8,23 @@
 import { loadAgentConfig } from "../runtime/config.js";
 
 // The canonical intake-ready template (matches the shape intakeTemplate.ts parses + the data
-// layer JobTemplate). The user picks the lifetime (>= minimum_lifetime); BTC is the only asset
-// the evaluation engine (btc-price-guess) scores. The gateway stores this JSON verbatim.
+// layer JobTemplate). The user picks the lifetime (>= minimum_lifetime). `evaluator_id` is the
+// finance evaluator's category id; "price-range-guess" scores a [minPrice, maxPrice] band
+// volatility-scaled by the lifetime (see evaluation-engine scoring/price_range.rs). The gateway
+// stores this JSON verbatim.
 const TEMPLATE = {
   id: "btc-price-range",
   category: "finance",
-  evaluator_id: "btc-price-guess",
-  description: "Guess the BTC/USD price range over a window you choose.",
+  evaluator_id: "price-range-guess",
+  description: "Guess the BTC/USD price band at the end of a window you choose.",
   params: [
-    { key: "asset", ask: "Which asset? (BTC only)", type: "string", required: true },
+    { key: "asset", ask: "Which asset? (BTC, ETH, SOL, SUI)", type: "string", required: true },
     { key: "horizon", ask: "Over what window? (at least 1 minute, e.g. 5m)", type: "duration", required: true },
   ],
   output: { minPrice: "number", maxPrice: "number" },
   start_data_template: { start_price: "number" },
   minimum_lifetime: 60000,
-  allowed_assets: ["BTC"],
+  allowed_assets: ["BTC", "ETH", "SOL", "SUI"],
 };
 
 function loadDotEnv(): void {

@@ -22,6 +22,7 @@ const DEFAULT_WALRUS_EPOCHS = "3";
 // data/.env.example). Overridable via env for a remote deployment.
 const DEFAULT_INTAKE_URL = "http://localhost:5000";
 const DEFAULT_DATA_GATEWAY_URL = "http://localhost:8787";
+const DEFAULT_COMPETITION_URL = "http://localhost:5100";
 
 // Open-mode testnet Seal key servers, read on-chain in the P0c spike (NOT assumed).
 // Used to encrypt the job result under the quadra::job_access policy. Both run in
@@ -105,6 +106,30 @@ export interface AgentConfig {
    * Absent -> the job lifecycle stays inert (no signed calls). NEVER logged.
    */
   readonly agentSignerKey: string | undefined;
+  /**
+   * Competition mode toggle (env COMPETITION_ENABLED, default OFF). When on (and a usable
+   * signer is present) the agent connects the competition socket and accepts FREE competition
+   * jobs alongside the paid lifecycle. Off -> the competition path is fully inert.
+   */
+  readonly competitionEnabled: boolean;
+  /** Competition-engine base URL the agent enrols/delivers against (env COMPETITION_URL). */
+  readonly competitionUrl: string;
+  /** Competition-engine socket origin for the `competition_job` push (env COMPETITION_SOCKET_URL,
+   * defaults to competitionUrl since socket.io shares the HTTP port). */
+  readonly competitionSocketUrl: string;
+  /**
+   * OPTIONAL competition id to auto-join on startup (env COMPETITION_ID). When set with
+   * competition mode on, the agent calls `join_competition` once at boot; the `/join <id>`
+   * command can also enrol manually.
+   */
+  readonly competitionId: string | undefined;
+  /**
+   * The deployed `quadra` package id (env QUADRA_PACKAGE_ID), used to build the on-chain
+   * `join_competition` call. Falls back to SEAL_PACKAGE_ID (the same published package).
+   */
+  readonly quadraPackageId: string | undefined;
+  /** The shared `agent::AgentRegistry` object id (env AGENT_REGISTRY_ID) for join calls. */
+  readonly agentRegistryId: string | undefined;
 }
 
 // Parse a positive-integer setting, falling back to `fallback` for a missing,
@@ -178,5 +203,14 @@ export function loadAgentConfig(env: NodeJS.ProcessEnv = process.env): AgentConf
       readTrimmed(env, "INTAKE_SOCKET_URL") ?? readTrimmed(env, "INTAKE_URL") ?? DEFAULT_INTAKE_URL,
     dataGatewayUrl: readTrimmed(env, "DATA_GATEWAY_URL") ?? DEFAULT_DATA_GATEWAY_URL,
     agentSignerKey: readTrimmed(env, "AGENT_SECRET_KEY") ?? readTrimmed(env, "WALRUS_SIGNER_KEY"),
+    competitionEnabled: (readTrimmed(env, "COMPETITION_ENABLED") ?? "").toLowerCase() === "true",
+    competitionUrl: readTrimmed(env, "COMPETITION_URL") ?? DEFAULT_COMPETITION_URL,
+    competitionSocketUrl:
+      readTrimmed(env, "COMPETITION_SOCKET_URL") ??
+      readTrimmed(env, "COMPETITION_URL") ??
+      DEFAULT_COMPETITION_URL,
+    competitionId: readTrimmed(env, "COMPETITION_ID"),
+    quadraPackageId: readTrimmed(env, "QUADRA_PACKAGE_ID") ?? readTrimmed(env, "SEAL_PACKAGE_ID"),
+    agentRegistryId: readTrimmed(env, "AGENT_REGISTRY_ID"),
   };
 }

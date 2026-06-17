@@ -10,6 +10,7 @@ import {
   listCharacters,
   type AgentCharacter,
 } from "../character/character.js";
+import { marketProducer } from "../jobs/marketProducer.js";
 
 const DEFAULT_USER = "local-user";
 
@@ -93,7 +94,10 @@ async function main(): Promise<void> {
   }
 
   const character = await resolveCharacter(args.characterRef);
-  await runInteractiveAgent({ character, user: args.user });
+  // Produce finance results from live market data (Pyth) instead of a blind LLM guess: a real
+  // price band for price-range jobs, a hold baseline for trading. Used by both the paid lifecycle
+  // and free competition jobs.
+  await runInteractiveAgent({ character, user: args.user, produce: marketProducer });
 }
 
 main().catch((err) => {
