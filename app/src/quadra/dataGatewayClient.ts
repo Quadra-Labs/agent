@@ -86,3 +86,30 @@ export async function registerSealedResult(
     retryable: false,
   };
 }
+
+export type PublishEndpointResult =
+  | { ok: true }
+  | { ok: false; message: string };
+
+/**
+ * POST /agent-endpoints — self-publish this agent's public URL so the web can route a
+ * chat to it. Signed (the gateway records it under the recovered wallet). NEVER throws.
+ * Best-effort: a failure is logged by the caller, not fatal to the agent.
+ */
+export async function publishAgentEndpoint(input: {
+  readonly baseUrl: string;
+  readonly signer: Signer;
+  readonly url: string;
+  readonly now?: () => number;
+}): Promise<PublishEndpointResult> {
+  const res = await sendQuadraSignedRequest({
+    signer: input.signer,
+    baseUrl: input.baseUrl,
+    path: "/agent-endpoints",
+    payload: { url: input.url },
+    ...(input.now ? { now: input.now } : {}),
+  });
+  if (!res.ok) return { ok: false, message: res.message };
+  if (res.status === 200) return { ok: true };
+  return { ok: false, message: errorMessage(res.json) || `gateway responded ${res.status}` };
+}

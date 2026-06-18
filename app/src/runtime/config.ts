@@ -140,6 +140,9 @@ export interface AgentConfig {
   readonly agentPort: number;
   /** Host/interface the liveness endpoint binds (env AGENT_HOST, default 0.0.0.0). */
   readonly agentHost: string;
+  /** Public URL this agent is reachable at (env AGENT_PUBLIC_URL), self-published to the data
+   * gateway so the web can route a chat to it. Undefined -> the agent does not publish. */
+  readonly agentPublicUrl: string | undefined;
 }
 
 // Parse a positive-integer setting, falling back to `fallback` for a missing,
@@ -224,5 +227,6 @@ export function loadAgentConfig(env: NodeJS.ProcessEnv = process.env): AgentConf
     agentRegistryId: readTrimmed(env, "AGENT_REGISTRY_ID"),
     agentPort: readPositiveInt(env, "AGENT_PORT", DEFAULT_AGENT_PORT),
     agentHost: readTrimmed(env, "AGENT_HOST") ?? DEFAULT_AGENT_HOST,
+    agentPublicUrl: readTrimmed(env, "AGENT_PUBLIC_URL"),
   };
 }

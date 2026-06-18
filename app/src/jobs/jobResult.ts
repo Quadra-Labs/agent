@@ -52,10 +52,13 @@ export interface JobResultEnvelope {
       readonly category: string;
       readonly description: string;
       readonly output: Record<string, "number" | "string">;
+      /** Empty ("") for a scoreless job (no evaluator). */
       readonly evaluator_id: string;
       readonly start_data_template: Record<string, string>;
       readonly minimum_lifetime: number;
       readonly allowed_assets: readonly string[];
+      /** Scoreless: paid on delivery, never scored. */
+      readonly scoreless: boolean;
     };
   };
   /** What the agent returned (shape matches template.output). */
@@ -412,6 +415,7 @@ export async function produceAndSealResult(
         start_data_template: {},
         minimum_lifetime: t.minimumLifetimeMs ?? 0,
         allowed_assets: t.allowedAssets ?? [],
+        scoreless: t.scoreless,
       },
     },
     agent_result: result,

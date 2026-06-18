@@ -7,6 +7,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "example:price-range": "tsx examples/run.ts",
+    "example:seo-article": "tsx examples/runSeoArticle.ts",
     "example:poly-resolution": "tsx examples/runPolymarketResolution.ts",
     "example:poly-event": "tsx examples/runPolymarketEvent.ts",
     "example:poly-price": "tsx examples/runPolymarketPrice.ts"

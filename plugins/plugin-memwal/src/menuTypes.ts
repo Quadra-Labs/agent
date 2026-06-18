@@ -16,6 +16,9 @@ export interface MenuTemplate {
     { ask: string; type: string; validation?: Record<string, unknown> }
   >;
   readonly output: Record<string, string>;
+  /** Scoreless: paid on delivery, never scored. Carried so a cache-served menu still parses
+   * the template as scoreless (it has no evaluator_id). */
+  readonly scoreless?: boolean;
   /** Optional fixed validity window; newer templates omit it in favour of minimum_lifetime. */
   readonly lifetime?: string;
   /** Optional minimum lifetime (ms); carried so a cache-served menu still enforces the floor on

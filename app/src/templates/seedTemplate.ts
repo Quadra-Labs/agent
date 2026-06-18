@@ -3,7 +3,8 @@
 // and the gateway stores the JSON VERBATIM (no schema check), so this seeds the rich
 // intake-ready shape (params array + lifetime) even though the data-layer TS type is minimal.
 // Gated: needs DATA_GATEWAY_URL reachable + ROLE_TOKEN_ADMIN. Never seeds without the token.
-// Run: `npm run seed:template` (after setting DATA_GATEWAY_URL + ROLE_TOKEN_ADMIN in .env).
+// Run: `npm run seed:template` (scored finance template) or `npm run seed:template -- --scoreless`
+// (the scoreless SEO-article template) after setting DATA_GATEWAY_URL + ROLE_TOKEN_ADMIN in .env.
 
 import { loadAgentConfig } from "../runtime/config.js";
 
@@ -27,6 +28,26 @@ const TEMPLATE = {
   allowed_assets: ["BTC", "ETH", "SOL", "SUI"],
 };
 
+// A SCORELESS template: no evaluator, no asset, no lifetime/scoring window. Paid on delivery
+// (the SEO article is sealed + stored), never scored. `scoreless: true` is what makes intake
+// skip the validator + scheduling and the agent offer it without an asset/lifetime. The scoring
+// fields are present-but-empty (the gateway stores JSON verbatim; consumers branch on scoreless).
+const SCORELESS_TEMPLATE = {
+  id: "seo-article",
+  category: "content",
+  scoreless: true,
+  evaluator_id: "",
+  description: "Write an SEO-friendly article on a topic and keywords you provide.",
+  params: [
+    { key: "topic", ask: "What topic should the article cover?", type: "string", required: true },
+    { key: "keywords", ask: "Which keywords should it target? (comma-separated)", type: "string", required: true },
+  ],
+  output: { article: "string" },
+  start_data_template: {},
+  minimum_lifetime: 0,
+  allowed_assets: [] as string[],
+};
+
 function loadDotEnv(): void {
   const loader = (process as { loadEnvFile?: (path?: string) => void }).loadEnvFile;
   if (typeof loader !== "function") return;
@@ -41,7 +62,8 @@ async function main(): Promise<void> {
   loadDotEnv();
   const config = loadAgentConfig();
   const adminToken = (process.env.ROLE_TOKEN_ADMIN ?? "").trim();
-  console.log(`seedTemplate: gateway=${config.dataGatewayUrl} template=${TEMPLATE.id}`);
+  const template = process.argv.includes("--scoreless") ? SCORELESS_TEMPLATE : TEMPLATE;
+  console.log(`seedTemplate: gateway=${config.dataGatewayUrl} template=${template.id}`);
 
   if (adminToken.length === 0) {
     console.log("SKIPPED: ROLE_TOKEN_ADMIN not set (admin token required to PUT /templates).");
@@ -53,7 +75,7 @@ async function main(): Promise<void> {
     res = await fetch(`${config.dataGatewayUrl}/templates`, {
       method: "PUT",
       headers: { "content-type": "application/json", "x-quadra-role": adminToken },
-      body: JSON.stringify(TEMPLATE),
+      body: JSON.stringify(template),
     });
   } catch (err) {
     console.log(`SKIPPED: gateway not reachable (${err instanceof Error ? err.message : "error"}). Set DATA_GATEWAY_URL or start the gateway.`);
@@ -62,7 +84,7 @@ async function main(): Promise<void> {
 
   if (res.ok) {
     console.log(
-      `PASS: seeded template "${TEMPLATE.id}". The agent will offer it after self-selection ` +
+      `PASS: seeded template "${template.id}". The agent will offer it after self-selection ` +
         "(re-run the chat to rebuild the menu).",
     );
     process.exit(0);

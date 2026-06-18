@@ -33,7 +33,11 @@ export interface IntakeTemplate {
   /** REAL data-layer template id; equals the intake engine's `template_id`. */
   readonly id: string;
   readonly category: string;
+  /** The evaluation engine's category id. EMPTY ("") for a scoreless template. */
   readonly evaluator_id: string;
+  /** Scoreless: paid on delivery, never evaluated/scored. The agent must be registered
+   *  scoreless on-chain to offer these (it cannot join competitions). */
+  readonly scoreless: boolean;
   readonly description: string;
   /** Required parameters keyed by name; NON-empty for an intake-ready template. */
   readonly params: Record<string, IntakeParam>;
@@ -168,7 +172,11 @@ function coerceIntakeTemplate(
 ): { ok: true; template: IntakeTemplate } | { ok: false; reason: string } {
   if (!isPlainObject(value)) return { ok: false, reason: "not a JSON object" };
   if (!isNonEmptyString(value.id)) return { ok: false, reason: "missing non-empty id" };
-  if (!isNonEmptyString(value.evaluator_id)) return { ok: false, reason: "missing non-empty evaluator_id" };
+  // Scoreless templates have no evaluator; scored ones require one.
+  const scoreless = value.scoreless === true;
+  if (!scoreless && !isNonEmptyString(value.evaluator_id)) {
+    return { ok: false, reason: "missing non-empty evaluator_id" };
+  }
   if (!isNonEmptyString(value.category)) return { ok: false, reason: "missing non-empty category" };
   if (!isNonEmptyString(value.description)) return { ok: false, reason: "missing non-empty description" };
 
@@ -204,7 +212,8 @@ function coerceIntakeTemplate(
     template: {
       id: value.id,
       category: value.category,
-      evaluator_id: value.evaluator_id,
+      evaluator_id: isNonEmptyString(value.evaluator_id) ? value.evaluator_id : "",
+      scoreless,
       description: value.description,
       params: params.params,
       output: value.output as Record<string, "number" | "string">,
@@ -319,11 +328,12 @@ export function renderIntakeTemplatesForPrompt(templates: readonly IntakeTemplat
             : `     Lifetime: the user picks it`;
       return [
         `  ${index + 1}. ${tpl.description} [id: ${tpl.id}]`,
+        ...(tpl.scoreless ? [`     Scoreless: paid on delivery, not scored (no competition).`] : []),
         `     Parameters to collect:`,
         questions,
         `     Produces: ${output}`,
-        lifetimeLine,
-        ...(tpl.allowedAssets && tpl.allowedAssets.length > 0
+        ...(tpl.scoreless ? [] : [lifetimeLine]),
+        ...(!tpl.scoreless && tpl.allowedAssets && tpl.allowedAssets.length > 0
           ? [`     Assets you can take (pick exactly one): ${tpl.allowedAssets.join(", ")}`]
           : []),
       ].join("\n");

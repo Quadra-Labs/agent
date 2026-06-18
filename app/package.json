@@ -6,6 +6,7 @@
   "description": "ElizaOS agent app: boots the runtime with all four plugins (sql, groq, walrus, memwal) live.",
   "scripts": {
     "chat": "tsx src/runtime/cli.ts",
+    "serve": "tsx src/runtime/serve.ts",
     "typecheck": "tsc --noEmit",
     "seed:template": "tsx src/templates/seedTemplate.ts",
     "register": "tsx src/runtime/registerAgent.ts",

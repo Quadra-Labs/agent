@@ -20,6 +20,10 @@ export interface AgentSpec {
   readonly systemPrompt?: string;
   /** OPTIONAL job-template category ids the agent offers. */
   readonly templateCategoryIds?: readonly string[];
+  /** OPTIONAL: a scoreless agent is paid on delivery but never evaluated/scored and
+   *  cannot join competitions. It must register on-chain as scoreless and only offer
+   *  scoreless templates. Default false. */
+  readonly scoreless?: boolean;
   /** OPTIONAL declared skills = the ctx.callSkill allow-list (not auto-dispatch).
    *  Under runAgent, omitted normalizes to [] = DENY-ALL. Names must be unique. */
   readonly skills?: readonly AnySkill[];
@@ -42,6 +46,8 @@ export interface AgentDefinition {
   readonly bio: readonly string[];
   readonly systemPrompt?: string;
   readonly templateCategoryIds?: readonly string[];
+  /** True if this is a scoreless agent (paid on delivery, never scored, no competitions). */
+  readonly scoreless: boolean;
   /** The declared skill manifest, normalized to a non-optional array. */
   readonly skills: readonly AnySkill[];
   /** The declared tool manifest, normalized to a non-optional array. */
@@ -86,6 +92,9 @@ export function defineAgent(spec: AgentSpec): AgentDefinition {
     throw new Error(
       'defineAgent: "templateCategoryIds", if present, must be an array of non-empty strings',
     );
+  }
+  if (spec.scoreless !== undefined && typeof spec.scoreless !== "boolean") {
+    throw new Error('defineAgent: "scoreless", if present, must be a boolean');
   }
 
   const skills = spec.skills ?? [];
@@ -162,6 +171,7 @@ export function defineAgent(spec: AgentSpec): AgentDefinition {
     ...(character.templateCategoryIds !== undefined
       ? { templateCategoryIds: character.templateCategoryIds }
       : {}),
+    scoreless: spec.scoreless === true,
     skills,
     tools,
     models,

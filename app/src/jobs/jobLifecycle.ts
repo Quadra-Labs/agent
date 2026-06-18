@@ -111,6 +111,9 @@ export interface AcceptanceDecision {
 function buildAcceptancePrompt(templates: readonly IntakeTemplate[], transcript: string): string {
   const jobLines = templates
     .map((t) => {
+      if (t.scoreless) {
+        return `  - ${t.id}: ${t.description} (scoreless: no asset or lifetime — quote a price only)`;
+      }
       const assets =
         t.allowedAssets && t.allowedAssets.length > 0
           ? ` (allowed assets: ${t.allowedAssets.join(", ")})`
@@ -124,15 +127,17 @@ function buildAcceptancePrompt(templates: readonly IntakeTemplate[], transcript:
     .join("\n");
   return [
     "Decide whether the AGENT (not the user) has agreed to take on ONE specific job from the",
-    "list below: it must have told the user a price, which asset it targets, AND the lifetime",
-    "(time window) the user asked for. The agent has the final say and may decline. Output ONLY",
-    "a single JSON object:",
+    "list below: it must have told the user a price. For a NON-scoreless job it must ALSO have",
+    "named which asset it targets AND the lifetime (time window) the user asked for. A SCORELESS",
+    "job needs only a price (set asset and lifetime to null for it). The agent has the final say",
+    "and may decline. Output ONLY a single JSON object:",
     '  { "accepted_template_id": "<id>", "cost": <number>, "asset": "<SYMBOL>", "lifetime": "<dur>" }',
     "      using one of the exact ids, the numeric price the agent quoted, the asset symbol",
-    '      (uppercase, e.g. BTC), and the lifetime as a duration string ("30s"/"5m"/"2h"/"1d"), OR',
+    '      (uppercase, e.g. BTC), and the lifetime as a duration string ("30s"/"5m"/"2h"/"1d"); use',
+    '      null for asset/lifetime on a scoreless job, OR',
     '  { "accepted_template_id": null, "cost": null, "asset": null, "lifetime": null }  if the',
-    "      agent has not yet clearly accepted a specific job at a price for a specific asset and",
-    "      lifetime. Be conservative: null unless ALL of id, cost, asset, and lifetime are clear.",
+    "      agent has not yet clearly accepted a specific job at a price (plus asset+lifetime for a",
+    "      non-scoreless job). Be conservative: null unless the required fields are clear.",
     "No prose, no markdown, no code fences -- just the raw JSON object.",
     "",
     "Jobs:",
@@ -264,28 +269,28 @@ async function handleIdle(input: AdvanceJobLifecycleInput): Promise<AdvanceResul
   } catch {
     return { state, notes }; // model hiccup — try again next turn, no user noise
   }
-  // The agent must have accepted a specific job AND quoted a cost AND named an asset AND a
-  // valid lifetime (>= the template minimum). A decline, or any missing field, simply waits
-  // (no submit, no noise). The user-chosen lifetime is what gets submitted.
-  if (
-    decision.templateId === null ||
-    decision.cost === null ||
-    decision.asset === null ||
-    decision.lifetime === null
-  ) {
+  // The agent must have accepted a specific job AND quoted a cost. A NON-scoreless job must
+  // also have a named asset AND a valid lifetime (>= the template minimum); a scoreless job
+  // needs neither (paid on delivery, never scored). A decline or any missing required field
+  // simply waits (no submit, no noise).
+  if (decision.templateId === null || decision.cost === null) {
     return { state, notes };
   }
 
   const template = templates.find((t) => t.id === decision.templateId);
   if (!template) return { state, notes };
 
+  if (!template.scoreless && (decision.asset === null || decision.lifetime === null)) {
+    return { state, notes };
+  }
+
   const submitted = await submitJob({
     baseUrl: config.intakeUrl,
     signer,
     templateId: decision.templateId,
-    lifetime: decision.lifetime,
+    lifetime: decision.lifetime ?? "",
     cost: decision.cost,
-    asset: decision.asset,
+    asset: decision.asset ?? "",
   });
   if (!submitted.ok) {
     notes.push(`Could not open the job (${submitted.kind}): ${submitted.message}.`);
@@ -328,7 +333,7 @@ async function handleIdle(input: AdvanceJobLifecycleInput): Promise<AdvanceResul
       template,
       session: s,
       submittedAtMs: (input.now ?? Date.now)(),
-      lifetime: decision.lifetime,
+      ...(decision.lifetime !== null ? { lifetime: decision.lifetime } : {}),
       paid: false,
     },
     notes,
