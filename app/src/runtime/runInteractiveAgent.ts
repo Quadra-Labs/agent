@@ -11,6 +11,7 @@ import { createInterface } from "node:readline";
 import type { Signer } from "@mysten/sui/cryptography";
 
 import { loadAgentConfig } from "./config.js";
+import { startHealthServer, type HealthServerHandle } from "./healthServer.js";
 import { createAgentRuntime, type AgentRuntimeHandle } from "./runtime.js";
 import { respond } from "../chat/chat.js";
 import { closeSession } from "../session/closeSession.js";
@@ -174,6 +175,18 @@ export async function runInteractiveAgent(opts: RunInteractiveAgentOptions): Pro
   let intakeSocket: IntakeSocketHandle | undefined;
   let competitionSocket: CompetitionSocketHandle | undefined;
 
+  // Inbound liveness endpoint so an external validator can confirm this agent is up
+  // and reports the wallet being registered. Independent of the job lifecycle.
+  const healthServer: HealthServerHandle | undefined = startHealthServer({
+    port: config.agentPort,
+    host: config.agentHost,
+    name: character.name,
+    signer: lifecycleSigner,
+  });
+  if (healthServer !== undefined) {
+    console.log(`Liveness endpoint live: GET http://${config.agentHost}:${config.agentPort}/ping`);
+  }
+
   console.log("");
   console.log(HELP);
   console.log("");
@@ -188,6 +201,7 @@ export async function runInteractiveAgent(opts: RunInteractiveAgentOptions): Pro
     deliveryPoll?.cancel();
     intakeSocket?.cancel();
     competitionSocket?.cancel();
+    await healthServer?.close();
     rl.close();
     await handle.stop();
     process.exit(code);

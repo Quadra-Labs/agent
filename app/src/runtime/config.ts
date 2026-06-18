@@ -24,6 +24,12 @@ const DEFAULT_INTAKE_URL = "http://localhost:5000";
 const DEFAULT_DATA_GATEWAY_URL = "http://localhost:8787";
 const DEFAULT_COMPETITION_URL = "http://localhost:5100";
 
+// The agent's own inbound liveness endpoint (GET /ping). An external validator (the
+// web Register flow) hits this to confirm the deployed agent is live and reports the
+// wallet being registered. 0.0.0.0 so it is reachable from outside the container.
+const DEFAULT_AGENT_PORT = 3939;
+const DEFAULT_AGENT_HOST = "0.0.0.0";
+
 // Open-mode testnet Seal key servers, read on-chain in the P0c spike (NOT assumed).
 // Used to encrypt the job result under the quadra::job_access policy. Both run in
 // Open mode, so basic testnet encryption needs no API key (see phase0/spike/P0c-seal.md).
@@ -130,6 +136,10 @@ export interface AgentConfig {
   readonly quadraPackageId: string | undefined;
   /** The shared `agent::AgentRegistry` object id (env AGENT_REGISTRY_ID) for join calls. */
   readonly agentRegistryId: string | undefined;
+  /** Port for the inbound liveness endpoint (env AGENT_PORT, default 3939). */
+  readonly agentPort: number;
+  /** Host/interface the liveness endpoint binds (env AGENT_HOST, default 0.0.0.0). */
+  readonly agentHost: string;
 }
 
 // Parse a positive-integer setting, falling back to `fallback` for a missing,
@@ -212,5 +222,7 @@ export function loadAgentConfig(env: NodeJS.ProcessEnv = process.env): AgentConf
     competitionId: readTrimmed(env, "COMPETITION_ID"),
     quadraPackageId: readTrimmed(env, "QUADRA_PACKAGE_ID") ?? readTrimmed(env, "SEAL_PACKAGE_ID"),
     agentRegistryId: readTrimmed(env, "AGENT_REGISTRY_ID"),
+    agentPort: readPositiveInt(env, "AGENT_PORT", DEFAULT_AGENT_PORT),
+    agentHost: readTrimmed(env, "AGENT_HOST") ?? DEFAULT_AGENT_HOST,
   };
 }

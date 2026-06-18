@@ -55,6 +55,19 @@ because the stub model cannot decide to call tools).
 
 In-REPL: `/close` writes a real checkpoint, `/help`, `/exit`.
 
+## Liveness endpoint
+
+A running agent serves `GET /ping` (and `/health`) on `AGENT_PORT` (default `3939`,
+bound to `AGENT_HOST`, default `0.0.0.0`). It returns the agent name and its public
+Sui address, never the secret:
+
+```json
+{ "ok": true, "service": "quadra-agent", "name": "WalrusAgent", "address": "0x...", "ready": true }
+```
+
+The web "Register agent" validator pings this to confirm a deployed agent is live and
+that it controls the wallet being registered. Expose `AGENT_PORT` on your deployment.
+
 ## Layout
 
 ```
