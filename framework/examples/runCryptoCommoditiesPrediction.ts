@@ -1,19 +1,15 @@
 // runCryptoCommoditiesPrediction.ts — the BRIDGE that runs the framework
 // `cryptoCommoditiesPredictionAgent` through the app's REAL intake / seal / payment loop AND the
-// free competition loop. It injects a `produce` hook that runs the agent's
-// `forecast_crypto_probability` skill to generate { probability } from the live market signals.
-// The market id + target date arrive in the collected params (collected is Record<string,string>,
-// so target_ts is coerced from a string). Run: `npm run example:crypto-prediction`.
+// free competition loop. It injects an LLM-DRIVEN `produce` hook (makeSkillProducer): after payment
+// confirms, the MODEL decides which of the agent's declared skills to call (here:
+// forecast_crypto_probability) to produce { probability }, mapping the collected job params
+// (market_id / target_ts) to the skill's input itself. Run: `npm run example:crypto-prediction`.
 
 import { fileURLToPath } from "node:url";
 
 import { runInteractiveAgent } from "../../app/src/runtime/runInteractiveAgent.js";
-import type { ProduceHook } from "../../app/src/jobs/jobResult.js";
-import { runSkill, makeSkillContext, makeHttp } from "../src/index.js";
-import {
-  cryptoCommoditiesPredictionAgent,
-  forecastCryptoProbability,
-} from "./cryptoCommoditiesPredictionAgent.js";
+import { makeSkillProducer } from "../src/index.js";
+import { cryptoCommoditiesPredictionAgent } from "./cryptoCommoditiesPredictionAgent.js";
 
 function loadAppEnv(): void {
   const loader = (process as { loadEnvFile?: (path?: string) => void }).loadEnvFile;
@@ -33,31 +29,10 @@ function parseUser(argv: readonly string[]): string {
 async function main(): Promise<void> {
   loadAppEnv();
 
-  const http = makeHttp();
-
-  const produce: ProduceHook = async ({ collected }) => {
-    const marketId = (collected.market_id ?? "").trim();
-    if (marketId.length === 0) return { ok: false, reason: "no market_id in the job params" };
-    const targetTs = Number(collected.target_ts ?? "");
-    if (!Number.isFinite(targetTs) || targetTs < 0) {
-      return { ok: false, reason: "target_ts must be a unix-seconds timestamp" };
-    }
-    const ctx = makeSkillContext({ http });
-    const res = await runSkill(
-      forecastCryptoProbability,
-      { marketId, targetTs: Math.floor(targetTs) },
-      ctx,
-    );
-    if (!res.ok) return { ok: false, reason: `${res.error.kind}: ${res.error.message}` };
-    // Surface the forecast on stderr so a live run is observable (the sealed result is { probability }).
-    console.error(`forecast: market ${marketId} @ ${Math.floor(targetTs)} -> ${res.value.probability}`);
-    return { ok: true, result: { probability: res.value.probability } };
-  };
-
   await runInteractiveAgent({
     character: cryptoCommoditiesPredictionAgent.character,
     user: parseUser(process.argv.slice(2)),
-    produce,
+    produce: makeSkillProducer(cryptoCommoditiesPredictionAgent.skills),
   });
 }
 

@@ -22,15 +22,25 @@ const GROQ_ERROR_SENTINEL = "Error generating text. Please try again later.";
 /** The produced job result: an object whose keys/types match job_template.output. */
 export type JobResult = Record<string, string | number>;
 
+/** The sealed model an LLM-driven producer uses. Structural (matches the framework's LoopModel), so
+ *  the app builds it from its runtime and hands it to the hook without importing the framework. */
+export interface ProducerModel {
+  generate(prompt: string): Promise<string>;
+}
+
 /**
  * An optional, framework-agnostic result producer. When supplied to produceAndSealResult it
- * REPLACES the default LLM producer — e.g. the price-range example agent supplies a hook that
- * runs its Pyth skill. The app only calls the callback; it knows nothing about the framework.
- * The returned result is still validated against the template's output schema before sealing.
+ * REPLACES the default LLM producer — e.g. the example agents supply a hook that lets the MODEL
+ * pick which of their skills to run (makeSkillProducer). The app only calls the callback; it knows
+ * nothing about the framework. The returned result is still validated against the template's output
+ * schema before sealing — so a bad result is rejected (and a weak agent simply scores low).
  */
 export type ProduceHook = (args: {
   readonly template: IntakeTemplate;
   readonly collected: Record<string, string>;
+  /** Present for LLM-driven producers: the model that decides which skill/strategy to run. Built
+   *  from the runtime by produceAndSealResult. Fixed producers ignore it. */
+  readonly model?: ProducerModel;
 }) => Promise<{ ok: true; result: JobResult } | { ok: false; reason: string }>;
 
 /**
@@ -376,7 +386,24 @@ export async function produceAndSealResult(
   // default LLM producer. Either way the result is validated against template.output.
   let result: JobResult;
   if (input.produce !== undefined) {
-    const produced = await input.produce({ template: input.template, collected: input.collected });
+    // The sealed model the producer may use to decide which skill/strategy to run. Lazy: it only
+    // calls runtime.useModel when the producer actually generates. A non-string / empty / groq
+    // sentinel response throws so we never seal a fake result.
+    const model: ProducerModel = {
+      generate: async (prompt: string): Promise<string> => {
+        const raw = await runtime.useModel(ModelType.TEXT_LARGE, { prompt });
+        const text = typeof raw === "string" ? raw : String(raw ?? "");
+        if (text.trim().length === 0 || text.trim() === GROQ_ERROR_SENTINEL) {
+          throw new Error("model returned an empty/sentinel response");
+        }
+        return text;
+      },
+    };
+    const produced = await input.produce({
+      template: input.template,
+      collected: input.collected,
+      model,
+    });
     if (!produced.ok) {
       return {
         ok: false,

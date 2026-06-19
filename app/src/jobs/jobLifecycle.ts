@@ -292,9 +292,11 @@ async function handleIdle(input: AdvanceJobLifecycleInput): Promise<AdvanceResul
     return { state, notes }; // model hiccup — try again next turn, no user noise
   }
   // The agent must have accepted a specific job AND quoted a cost. A NON-scoreless job must
-  // also have a named asset AND a valid lifetime (>= the template minimum); a scoreless job
-  // needs neither (paid on delivery, never scored). A decline or any missing required field
-  // simply waits (no submit, no noise).
+  // also have a valid lifetime (>= the template minimum), and a named asset ONLY when the
+  // template actually constrains assets (finance jobs). PREDICTION templates (polymarket-*)
+  // are asset-less by design — they resolve from params (market_id / target_ts), so an empty
+  // asset is expected. A scoreless job needs neither (paid on delivery, never scored). A
+  // decline or any missing required field simply waits (no submit, no noise).
   if (decision.templateId === null || decision.cost === null) {
     return { state, notes };
   }
@@ -302,7 +304,11 @@ async function handleIdle(input: AdvanceJobLifecycleInput): Promise<AdvanceResul
   const template = templates.find((t) => t.id === decision.templateId);
   if (!template) return { state, notes };
 
-  if (!template.scoreless && (decision.asset === null || decision.lifetime === null)) {
+  const needsAsset = (template.allowedAssets?.length ?? 0) > 0;
+  if (
+    !template.scoreless &&
+    (decision.lifetime === null || (needsAsset && decision.asset === null))
+  ) {
     return { state, notes };
   }
 

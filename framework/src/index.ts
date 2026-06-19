@@ -81,6 +81,10 @@ export {
   type AgentDefinition,
 } from "./session/defineAgent.js";
 
+// The LLM-driven job producer: expose an agent's skills as tools and let the MODEL pick which to
+// run to produce a job result (vs a hardcoded single-skill call). Used by the example bridges.
+export { makeSkillProducer, type SkillProducerOptions } from "./session/skillProducer.js";
+
 // The MCP-tools surface: developer plain functions the LLM decides to run, served by
 // an in-process MCP server (never exposed publicly). Separate from skills.
 export {

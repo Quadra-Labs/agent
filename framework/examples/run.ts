@@ -1,16 +1,15 @@
 // run.ts — the BRIDGE that runs the framework `priceRangeAgent` through the app's REAL intake /
 // seal / payment loop. It reuses the app's exported `runInteractiveAgent` (so there is no app ->
-// framework dependency) and injects a `produce` hook that runs the agent's Pyth `quote_price_range`
-// skill to generate the {minPrice, maxPrice} result after payment confirms. The agent's identity
-// (character) comes from the framework `defineAgent`. Run: `npm run example:price-range`.
+// framework dependency) and injects an LLM-DRIVEN `produce` hook (makeSkillProducer): after payment
+// confirms, the MODEL decides which of the agent's declared skills to call to produce the
+// {minPrice, maxPrice} result. The agent's identity (character) + its skill manifest both come from
+// the framework `defineAgent`. Run: `npm run example:price-range`.
 
 import { fileURLToPath } from "node:url";
 
 import { runInteractiveAgent } from "../../app/src/runtime/runInteractiveAgent.js";
-import { parseDurationMs } from "../../app/src/templates/intakeTemplate.js";
-import type { ProduceHook } from "../../app/src/jobs/jobResult.js";
-import { runSkill, makeSkillContext, makeHttp } from "../src/index.js";
-import { priceRangeAgent, quotePriceRange } from "./priceRangeAgent.js";
+import { makeSkillProducer } from "../src/index.js";
+import { priceRangeAgent } from "./priceRangeAgent.js";
 
 // Load the app's .env (this script runs from agent/framework, so the app .env is two dirs up).
 function loadAppEnv(): void {
@@ -31,26 +30,11 @@ function parseUser(argv: readonly string[]): string {
 async function main(): Promise<void> {
   loadAppEnv();
 
-  // One bounded HTTP client shared by every produce call (the skill fetches Pyth through it).
-  const http = makeHttp();
-
-  // The result producer: run the framework skill, map its typed output to the job result. The
-  // app validates this against the template's output schema before sealing. NEVER throws.
-  const produce: ProduceHook = async ({ collected }) => {
-    const asset = collected.asset ?? "BTC";
-    const lifetimeMs = parseDurationMs(collected.horizon ?? "") ?? 60_000;
-    const ctx = makeSkillContext({ http });
-    const res = await runSkill(quotePriceRange, { asset, lifetimeMs }, ctx);
-    if (!res.ok) {
-      return { ok: false, reason: `${res.error.kind}: ${res.error.message}` };
-    }
-    return { ok: true, result: { minPrice: res.value.minPrice, maxPrice: res.value.maxPrice } };
-  };
-
   await runInteractiveAgent({
     character: priceRangeAgent.character,
     user: parseUser(process.argv.slice(2)),
-    produce,
+    // The model picks which declared skill to run (here: quote_price_range) to produce the result.
+    produce: makeSkillProducer(priceRangeAgent.skills),
   });
 }
 

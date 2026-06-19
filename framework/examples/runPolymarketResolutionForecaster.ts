@@ -1,19 +1,16 @@
 // runPolymarketResolutionForecaster.ts — the BRIDGE that runs the framework
 // `polymarketResolutionForecaster` through the app's REAL intake / seal / payment loop (and the
-// free competition loop). It injects a `produce` hook that runs the agent's `call_market_resolution`
-// skill to generate { outcome } from the live market. The market id arrives in the collected params
-// (the polymarket-resolution template's only param is `market_id`). Run from agent/framework:
+// free competition loop). It injects an LLM-DRIVEN `produce` hook (makeSkillProducer): after
+// payment confirms, the MODEL decides which of the agent's declared skills to call (here:
+// call_market_resolution) to produce { outcome }, mapping the collected market_id param to the
+// skill's input itself. Run from agent/framework:
 //   npx tsx examples/runPolymarketResolutionForecaster.ts --user demo-user
 
 import { fileURLToPath } from "node:url";
 
 import { runInteractiveAgent } from "../../app/src/runtime/runInteractiveAgent.js";
-import type { ProduceHook } from "../../app/src/jobs/jobResult.js";
-import { runSkill, makeSkillContext, makeHttp } from "../src/index.js";
-import {
-  polymarketResolutionForecaster,
-  callMarketResolution,
-} from "./polymarketResolutionForecaster.js";
+import { makeSkillProducer } from "../src/index.js";
+import { polymarketResolutionForecaster } from "./polymarketResolutionForecaster.js";
 
 function loadAppEnv(): void {
   const loader = (process as { loadEnvFile?: (path?: string) => void }).loadEnvFile;
@@ -33,23 +30,10 @@ function parseUser(argv: readonly string[]): string {
 async function main(): Promise<void> {
   loadAppEnv();
 
-  const http = makeHttp();
-
-  const produce: ProduceHook = async ({ collected }) => {
-    const marketId = (collected.market_id ?? "").trim();
-    if (marketId.length === 0) return { ok: false, reason: "no market_id in the job params" };
-    const ctx = makeSkillContext({ http });
-    const res = await runSkill(callMarketResolution, { marketId }, ctx);
-    if (!res.ok) return { ok: false, reason: `${res.error.kind}: ${res.error.message}` };
-    // Surface the call on stderr so a live run is observable (the sealed result is { outcome }).
-    console.error(`resolution: market ${marketId} -> ${res.value.outcome}`);
-    return { ok: true, result: { outcome: res.value.outcome } };
-  };
-
   await runInteractiveAgent({
     character: polymarketResolutionForecaster.character,
     user: parseUser(process.argv.slice(2)),
-    produce,
+    produce: makeSkillProducer(polymarketResolutionForecaster.skills),
   });
 }
 

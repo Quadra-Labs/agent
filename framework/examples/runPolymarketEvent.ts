@@ -1,15 +1,14 @@
 // runPolymarketEvent.ts — the BRIDGE that runs the framework `polymarketEventAgent` through the
-// app's REAL intake / seal / payment loop AND the free competition loop. It injects a `produce`
-// hook that runs the agent's `guess_event` skill to generate { guesses } (a JSON-encoded array)
-// from the live event. The event id comes from the collected params. Run:
-// `npm run example:poly-event`.
+// app's REAL intake / seal / payment loop AND the free competition loop. It injects an LLM-DRIVEN
+// `produce` hook (makeSkillProducer): after payment confirms, the MODEL decides which of the
+// agent's declared skills to call (here: guess_event) to produce { guesses }, mapping the collected
+// event_id param to the skill's input itself. Run: `npm run example:poly-event`.
 
 import { fileURLToPath } from "node:url";
 
 import { runInteractiveAgent } from "../../app/src/runtime/runInteractiveAgent.js";
-import type { ProduceHook } from "../../app/src/jobs/jobResult.js";
-import { runSkill, makeSkillContext, makeHttp } from "../src/index.js";
-import { polymarketEventAgent, guessEvent } from "./polymarketEventAgent.js";
+import { makeSkillProducer } from "../src/index.js";
+import { polymarketEventAgent } from "./polymarketEventAgent.js";
 
 function loadAppEnv(): void {
   const loader = (process as { loadEnvFile?: (path?: string) => void }).loadEnvFile;
@@ -29,21 +28,10 @@ function parseUser(argv: readonly string[]): string {
 async function main(): Promise<void> {
   loadAppEnv();
 
-  const http = makeHttp();
-
-  const produce: ProduceHook = async ({ collected }) => {
-    const eventId = (collected.event_id ?? "").trim();
-    if (eventId.length === 0) return { ok: false, reason: "no event_id in the job params" };
-    const ctx = makeSkillContext({ http });
-    const res = await runSkill(guessEvent, { eventId }, ctx);
-    if (!res.ok) return { ok: false, reason: `${res.error.kind}: ${res.error.message}` };
-    return { ok: true, result: { guesses: res.value.guesses } };
-  };
-
   await runInteractiveAgent({
     character: polymarketEventAgent.character,
     user: parseUser(process.argv.slice(2)),
-    produce,
+    produce: makeSkillProducer(polymarketEventAgent.skills),
   });
 }
 

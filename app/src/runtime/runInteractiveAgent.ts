@@ -383,6 +383,12 @@ export async function runInteractiveAgent(opts: RunInteractiveAgentOptions): Pro
   // job finishes even if the user has gone silent after paying. The flag is applied inside the
   // serialized lifecycle step (see paidJobs above) to avoid the chat-turn race.
   const handleJobPaid = async (event: JobPaidEvent): Promise<void> => {
+    // The intake engine rooms `job_paid` by WALLET, not by session. When several agents run under
+    // the SAME wallet (e.g. two local terminals in the single-wallet demo) each socket receives the
+    // others' payment events. Only react to the job THIS agent actually opened — otherwise we'd log
+    // a misleading "finishing" for a job we have no session for. (Production runs each agent under
+    // its own wallet, so this is a no-op there.)
+    if (jobState.session?.job_id !== event.job_id) return;
     if (paidJobs.has(event.job_id)) return; // already handled this payment
     paidJobs.set(event.job_id, event.paid_at_ms);
     console.log(`[job] Payment confirmed for job ${event.job_id}. Finishing the job...`);
