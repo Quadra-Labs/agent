@@ -136,6 +136,9 @@ export interface AgentConfig {
   readonly quadraPackageId: string | undefined;
   /** The shared `agent::AgentRegistry` object id (env AGENT_REGISTRY_ID) for join calls. */
   readonly agentRegistryId: string | undefined;
+  /** The shared `job_access::JobAccessRegistry` object id (env JOB_ACCESS_REGISTRY_ID), needed to
+   * build the on-chain `intake::pay_for_job` call when the host settles a job's escrow from chat. */
+  readonly jobAccessRegistryId: string | undefined;
   /** Port for the inbound liveness endpoint (env AGENT_PORT, default 3939). */
   readonly agentPort: number;
   /** Host/interface the liveness endpoint binds (env AGENT_HOST, default 0.0.0.0). */
@@ -225,6 +228,7 @@ export function loadAgentConfig(env: NodeJS.ProcessEnv = process.env): AgentConf
     competitionId: readTrimmed(env, "COMPETITION_ID"),
     quadraPackageId: readTrimmed(env, "QUADRA_PACKAGE_ID") ?? readTrimmed(env, "SEAL_PACKAGE_ID"),
     agentRegistryId: readTrimmed(env, "AGENT_REGISTRY_ID"),
+    jobAccessRegistryId: readTrimmed(env, "JOB_ACCESS_REGISTRY_ID"),
     agentPort: readPositiveInt(env, "AGENT_PORT", DEFAULT_AGENT_PORT),
     agentHost: readTrimmed(env, "AGENT_HOST") ?? DEFAULT_AGENT_HOST,
     agentPublicUrl: readTrimmed(env, "AGENT_PUBLIC_URL"),

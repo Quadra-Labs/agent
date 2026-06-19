@@ -61,6 +61,12 @@ export interface JobResultEnvelope {
       readonly scoreless: boolean;
     };
   };
+  /** The fixed job params the result was produced against (e.g. prediction's
+   * `{ market_id, target_ts }`). Sealed here because the scheduler decrypts THIS envelope to
+   * score a paid prediction job and forwards these to the polymarket-* evaluators (which resolve
+   * ground truth from params, not a Pyth asset). Absent/empty for finance jobs (scheduler ignores
+   * params for them). Mirrors the data layer's JobResult.params. */
+  readonly params?: Record<string, string>;
   /** What the agent returned (shape matches template.output). */
   readonly agent_result: JobResult;
   /** Filled by the evaluation engine at scoring; empty at delivery. */
@@ -418,6 +424,11 @@ export async function produceAndSealResult(
         scoreless: t.scoreless,
       },
     },
+    // The collected param values the result was produced against. For a paid prediction job these
+    // (market_id / target_ts) are the ONLY carrier of the evaluator's ground-truth inputs into the
+    // scheduler, which scores by decrypting this envelope. Sealed for every job; only prediction
+    // scoring reads them (scheduler buildPayload gates on category === "prediction").
+    params: { ...input.collected },
     agent_result: result,
     finalized_result: {},
     score: 0,

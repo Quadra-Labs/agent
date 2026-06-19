@@ -88,6 +88,28 @@ function narrowNetwork(n: string): "testnet" | "mainnet" | "devnet" | "localnet"
   return n === "mainnet" || n === "devnet" || n === "localnet" ? n : "testnet";
 }
 
+// Walrus writes (and the Seal key-server / market-data fetches behind produce) occasionally fail
+// transiently on testnet; the typed results flag those as `retryable`. AFTER payment the agent has
+// no trigger to re-run produce/register until the user chats again — which they usually do not once
+// they have paid — so a single transient hiccup would strand a PAID job (scored 0 at lifetime end,
+// the failure we hit live). Retry the retryable steps a few times with linear backoff so a one-off
+// failure self-heals well within the job window (each Walrus write is ~10-30s on testnet). A
+// non-retryable failure (config/invalid_result/unauthorized) returns immediately — retrying it is
+// pointless. NEVER throws (the wrapped ops never throw).
+async function withRetry<T extends { ok: boolean }>(
+  op: () => Promise<T>,
+  retryable: (r: T) => boolean,
+  attempts = 4,
+  baseDelayMs = 2000,
+): Promise<T> {
+  let last = await op();
+  for (let i = 1; i < attempts && retryable(last); i++) {
+    await new Promise((resolve) => setTimeout(resolve, baseDelayMs * i));
+    last = await op();
+  }
+  return last;
+}
+
 // --- acceptance classifier (idle -> submitted trigger) -----------------------
 //
 // The AGENT decides whether to take a job and what to charge — the user does not set the
@@ -401,33 +423,41 @@ async function handleSubmitted(input: AdvanceJobLifecycleInput): Promise<Advance
   if (!allCollected) return { state, notes }; // paid early — keep collecting; no noise
 
   const agentAddress = signer.toSuiAddress();
-  const sealed = await produceAndSealResult(runtime, {
-    jobId: session.job_id,
-    template,
-    collected: merged,
-    packageId: config.sealPackageId,
-    keyServerIds: config.sealKeyServerIds,
-    threshold: config.sealThreshold,
-    network: narrowNetwork(config.walrusNetwork),
-    ...(input.produce !== undefined ? { produce: input.produce } : {}),
-    // Envelope metadata: in the single-wallet demo the payer == the agent.
-    agentAddress,
-    userAddress: agentAddress,
-    lifetime: state.lifetime ?? template.lifetime ?? "5m",
-    startedAtMs: state.paidAtMs ?? state.submittedAtMs ?? (input.now ?? Date.now)(),
-    ...(input.now ? { now: input.now } : {}),
-  });
+  const sealed = await withRetry(
+    () =>
+      produceAndSealResult(runtime, {
+        jobId: session.job_id,
+        template,
+        collected: merged,
+        packageId: config.sealPackageId,
+        keyServerIds: config.sealKeyServerIds,
+        threshold: config.sealThreshold,
+        network: narrowNetwork(config.walrusNetwork),
+        ...(input.produce !== undefined ? { produce: input.produce } : {}),
+        // Envelope metadata: in the single-wallet demo the payer == the agent.
+        agentAddress,
+        userAddress: agentAddress,
+        lifetime: state.lifetime ?? template.lifetime ?? "5m",
+        startedAtMs: state.paidAtMs ?? state.submittedAtMs ?? (input.now ?? Date.now)(),
+        ...(input.now ? { now: input.now } : {}),
+      }),
+    (r) => !r.ok && r.retryable === true,
+  );
   if (!sealed.ok) {
     notes.push(`Could not prepare the result (${sealed.kind}): ${sealed.message}.`);
     return { state, notes };
   }
 
-  const registered = await registerSealedResult({
-    baseUrl: config.dataGatewayUrl,
-    signer,
-    jobId: session.job_id,
-    ciphertext: sealed.ciphertext,
-  });
+  const registered = await withRetry(
+    () =>
+      registerSealedResult({
+        baseUrl: config.dataGatewayUrl,
+        signer,
+        jobId: session.job_id,
+        ciphertext: sealed.ciphertext,
+      }),
+    (r) => !r.ok && r.retryable === true,
+  );
   if (!registered.ok) {
     notes.push(
       `Could not register the result with the data gateway (${registered.kind}): ${registered.message}.`,

@@ -19,6 +19,7 @@ import { recallCheckpoint } from "../session/recallCheckpoint.js";
 import { normalizeWalrusSigner } from "./walrusSigner.js";
 import { listTurns } from "../chat/chatMemory.js";
 import { advanceJobLifecycle, applyJobPaid, type JobState } from "../jobs/jobLifecycle.js";
+import { payForJob } from "../jobs/payJob.js";
 import { startDeliveryPoll, type DeliveryPollHandle, type DeliveryOutcome } from "../jobs/deliveryPoll.js";
 import type { IntakeSession } from "../quadra/intakeClient.js";
 import {
@@ -249,6 +250,11 @@ export async function runInteractiveAgent(opts: RunInteractiveAgentOptions): Pro
   // can never clobber the `paid` flag.
   const paidJobs = new Map<string, number>();
 
+  // Job ids whose escrow the host has already submitted a pay_for_job for (chat-driven payment).
+  // Deduped so a coalesced lifecycle re-run never double-pays; an entry is dropped if the tx fails
+  // so the next step can retry.
+  const autoPaidJobs = new Set<string>();
+
   // One lifecycle advance: read the transcript, advance the (payment-first) state machine, print
   // its notes, and start the background delivery poller on the transition to delivering. Shared
   // by the chat-turn path and the socket `job_paid` path. Threads the optional produce hook.
@@ -282,6 +288,49 @@ export async function runInteractiveAgent(opts: RunInteractiveAgentOptions): Pro
       });
       jobState = advanced.state;
       for (const note of advanced.notes) console.log(`[job] ${note}`);
+
+      // Chat-driven escrow: the moment a job is opened (idle -> submitted), settle its escrow
+      // on-chain from the host wallet — the dApp's pay_for_job step, done here so the flow is fully
+      // chat-driven (the user accepts in chat; the cost is locked in escrow with no separate
+      // frontend/terminal). The intake engine observes JobPaid and pushes `job_paid`, which drives
+      // produce + deliver; on a valid delivery the escrow releases to the agent, else it refunds.
+      // Fire-and-forget (the tx takes a few seconds) + deduped so a coalesced re-run never
+      // double-pays. A failed tx drops the dedupe entry so the next lifecycle step retries.
+      if (
+        beforePhase !== "submitted" &&
+        jobState.phase === "submitted" &&
+        jobState.session !== undefined &&
+        !autoPaidJobs.has(jobState.session.job_id)
+      ) {
+        const session = jobState.session;
+        autoPaidJobs.add(session.job_id);
+        console.log(`[pay] Locking ${session.cost} QUADRA into escrow for job ${session.job_id}...`);
+        void payForJob({
+          signer: lifecycleSigner,
+          network: narrowNetwork(config.walrusNetwork),
+          quadraPackageId: config.quadraPackageId ?? "",
+          agentRegistryId: config.agentRegistryId ?? "",
+          jobAccessRegistryId: config.jobAccessRegistryId ?? "",
+          sessionId: session.session_id,
+          jobId: session.job_id,
+          agentWallet: session.agent_wallet,
+          cost: session.cost,
+        })
+          .then((res) => {
+            if (res.ok) {
+              console.log(
+                `[pay] Escrow locked (tx ${res.digest}). I'll finish the job once the intake engine confirms the payment.`,
+              );
+            } else {
+              autoPaidJobs.delete(session.job_id); // allow a retry on the next lifecycle step
+              console.log(`[pay] Could not lock escrow (${res.kind}): ${res.message}`);
+            }
+          })
+          .catch(() => {
+            autoPaidJobs.delete(session.job_id);
+            console.log("[pay] Could not lock escrow (unexpected error).");
+          });
+      }
 
       if (
         beforePhase !== "delivering" &&
