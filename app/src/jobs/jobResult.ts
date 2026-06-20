@@ -386,6 +386,29 @@ function deriveTargetTsSeconds(startedAtMs: number, lifetime: string): number | 
   return Math.floor((startedAtMs + lifeMs - bufferMs) / 1000);
 }
 
+// Per-evaluator SEMANTIC invariants the produced result must satisfy beyond the output-schema gate
+// (validateResultObject only checks field presence/type). These mirror the evaluation engine's own
+// agent-fault checks, so a violating result fails CLOSED before sealing — and, being a recoverable
+// producer mistake, is RETRIED — instead of being delivered and scored 0. Each returns an error
+// message, or undefined when the result is valid. Add an entry as a new evaluator needs one.
+type ResultInvariant = (result: JobResult) => string | undefined;
+
+const RESULT_INVARIANTS: Readonly<Record<string, ResultInvariant>> = {
+  // price-range-guess: the band must be non-empty. Mirrors scoring/price_range.rs, which rejects
+  // maxPrice <= minPrice as a BadAgentResult (score 0). The output-schema gate already guarantees
+  // both are finite numbers; here we enforce the ordering the engine requires.
+  "price-range-guess": (result) => {
+    const min = result.minPrice;
+    const max = result.maxPrice;
+    if (typeof min !== "number" || typeof max !== "number") return undefined;
+    return max > min ? undefined : `maxPrice (${max}) must be greater than minPrice (${min})`;
+  },
+};
+
+function checkResultInvariant(evaluatorId: string, result: JobResult): string | undefined {
+  return RESULT_INVARIANTS[evaluatorId]?.(result);
+}
+
 export async function produceAndSealResult(
   runtime: IAgentRuntime,
   input: SealResultInput,
@@ -460,6 +483,21 @@ export async function produceAndSealResult(
     const produced = await produceResult(runtime, input.template, collected);
     if (!produced.ok) return produced;
     result = produced.result;
+  }
+
+  // Enforce per-evaluator semantic invariants (e.g. price-range maxPrice>minPrice) BEFORE sealing.
+  // The output-schema gate above only checks field types; this catches a shape-valid but
+  // semantically-bad result (which the engine would otherwise score 0) and fails closed so the
+  // producer is retried (retryable) instead of delivering a guaranteed-0 result.
+  const invariantError = checkResultInvariant(input.template.evaluator_id, result);
+  if (invariantError !== undefined) {
+    return {
+      ok: false,
+      kind: "model_error",
+      errorName: "SemanticInvariantViolation",
+      message: invariantError,
+      retryable: true,
+    };
   }
 
   // Wrap the produced agent_result in the FULL envelope the validator/scheduler decrypt + read.

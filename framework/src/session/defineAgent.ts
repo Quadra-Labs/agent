@@ -3,7 +3,7 @@
 // definition shape (throws on a malformed one) and assembles the value; nothing touches
 // the runtime. skills = the ctx.callSkill ALLOW-LIST (not auto-dispatch).
 
-import type { AgentCharacter } from "../../../app/src/character/character.js";
+import type { AgentCharacter, AgentCapabilities } from "../../../app/src/character/character.js";
 import type { AnySkill } from "../skills/skillRunner.js";
 import type { AnyTool } from "../tools/defineTool.js";
 import type { ModelSpec } from "../models.js";
@@ -18,8 +18,16 @@ export interface AgentSpec {
   readonly bio: readonly string[];
   /** OPTIONAL system-prompt override for the default chat loop. */
   readonly systemPrompt?: string;
-  /** OPTIONAL job-template category ids the agent offers. */
+  /** OPTIONAL job-template category ids the agent offers (the broad data-layer category, e.g.
+   *  "finance" / "prediction"). Narrows the template pre-filter to matching `category`. */
   readonly templateCategoryIds?: readonly string[];
+  /** OPTIONAL granular evaluator binding: the evaluation-engine evaluator_id(s) this agent's skills
+   *  can actually produce — exact values OR prefixes (e.g. ["polymarket-price"] binds to that one
+   *  evaluator; ["polymarket-"] binds to the whole polymarket family). When present, the template
+   *  pre-filter drops any template whose `evaluator_id` is outside this set BEFORE the agent
+   *  self-selects, so a "prediction" agent that only forecasts prices is never bound to a
+   *  polymarket-event/-resolution template it cannot fulfil. Absent -> category-only narrowing. */
+  readonly evaluators?: readonly string[];
   /** OPTIONAL: a scoreless agent is paid on delivery but never evaluated/scored and
    *  cannot join competitions. It must register on-chain as scoreless and only offer
    *  scoreless templates. Default false. */
@@ -46,6 +54,8 @@ export interface AgentDefinition {
   readonly bio: readonly string[];
   readonly systemPrompt?: string;
   readonly templateCategoryIds?: readonly string[];
+  /** The granular evaluator binding (exact ids or prefixes), normalized; absent if undeclared. */
+  readonly evaluators?: readonly string[];
   /** True if this is a scoreless agent (paid on delivery, never scored, no competitions). */
   readonly scoreless: boolean;
   /** The declared skill manifest, normalized to a non-optional array. */
@@ -92,6 +102,12 @@ export function defineAgent(spec: AgentSpec): AgentDefinition {
     throw new Error(
       'defineAgent: "templateCategoryIds", if present, must be an array of non-empty strings',
     );
+  }
+  if (
+    spec.evaluators !== undefined &&
+    (!Array.isArray(spec.evaluators) || !spec.evaluators.every(isNonEmptyString))
+  ) {
+    throw new Error('defineAgent: "evaluators", if present, must be an array of non-empty strings');
   }
   if (spec.scoreless !== undefined && typeof spec.scoreless !== "boolean") {
     throw new Error('defineAgent: "scoreless", if present, must be a boolean');
@@ -153,15 +169,28 @@ export function defineAgent(spec: AgentSpec): AgentDefinition {
     }
   }
 
-  // Derive the rail-facing character ONCE. Trim identity strings to match
-  // parseCharacter's normalization; include optional fields only when present.
+  // Derive the rail-facing character ONCE. Trim identity strings to match parseCharacter's
+  // normalization; include optional fields only when present. The broad pre-filter SCOPE
+  // (capabilities) is built here from the declared template categories + evaluator binding, so the
+  // menu's prefilterCandidates narrows to templates this agent can actually serve. This wires the
+  // folding character.ts documents (templateCategoryIds -> capabilities.categories) which was
+  // previously only honored for character FILES, plus the new granular evaluator binding.
+  const categories = spec.templateCategoryIds?.map((id) => id.trim());
+  const evaluatorFamilies = spec.evaluators?.map((e) => e.trim());
+  const capabilities: AgentCapabilities | undefined =
+    categories !== undefined || evaluatorFamilies !== undefined
+      ? {
+          ...(categories !== undefined ? { categories } : {}),
+          ...(evaluatorFamilies !== undefined ? { evaluatorFamilies } : {}),
+        }
+      : undefined;
+
   const character: AgentCharacter = {
     name: spec.name.trim(),
     bio: spec.bio.map((line) => line.trim()),
     ...(spec.systemPrompt !== undefined ? { systemPrompt: spec.systemPrompt.trim() } : {}),
-    ...(spec.templateCategoryIds !== undefined
-      ? { templateCategoryIds: spec.templateCategoryIds.map((id) => id.trim()) }
-      : {}),
+    ...(categories !== undefined ? { templateCategoryIds: categories } : {}),
+    ...(capabilities !== undefined ? { capabilities } : {}),
   };
 
   return {
@@ -171,6 +200,7 @@ export function defineAgent(spec: AgentSpec): AgentDefinition {
     ...(character.templateCategoryIds !== undefined
       ? { templateCategoryIds: character.templateCategoryIds }
       : {}),
+    ...(evaluatorFamilies !== undefined ? { evaluators: evaluatorFamilies } : {}),
     scoreless: spec.scoreless === true,
     skills,
     tools,
