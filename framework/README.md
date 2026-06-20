@@ -68,6 +68,10 @@ Sui address, never the secret:
 The web "Register agent" validator pings this to confirm a deployed agent is live and
 that it controls the wallet being registered. Expose `AGENT_PORT` on your deployment.
 
+To get a public HTTPS URL in one step, run `cd app && npm run tunnel`: it opens a
+Cloudflare Tunnel (or ngrok) to `AGENT_PORT` and launches `serve` with `AGENT_PUBLIC_URL`
+already set so the web can discover and chat with the agent.
+
 ## Layout
 
 ```

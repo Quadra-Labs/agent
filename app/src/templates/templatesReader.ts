@@ -78,9 +78,17 @@ function computeSourceHash(raw: unknown): string {
  * Fetch GET /templates and produce a freshness-keyed snapshot. `network_error` passes
  * through from the transport; a non-200 is `unexpected_status`; a 200 whose body is not a
  * JSON array or object is `invalid_body`. NEVER throws.
+ *
+ * The timeout is deliberately generous (30s, vs the 10s shared default): /templates reads the
+ * job-templates document from the data layer and can be slow on a remote gateway, and this is a
+ * boot-time, latency-tolerant fetch — better to wait than to spuriously report `network_error`
+ * and boot with an empty menu. A genuinely-down gateway still fails fast (connection refused).
  */
-export async function fetchJobTemplates(baseUrl: string): Promise<FetchTemplatesResult> {
-  const res = await getQuadraJson(baseUrl, "/templates");
+export async function fetchJobTemplates(
+  baseUrl: string,
+  timeoutMs = 30_000,
+): Promise<FetchTemplatesResult> {
+  const res = await getQuadraJson(baseUrl, "/templates", timeoutMs);
   if (!res.ok) return res; // network_error
 
   if (res.status !== 200) {

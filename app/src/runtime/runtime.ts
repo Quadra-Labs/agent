@@ -4,11 +4,25 @@
 // initialize()); walrus before memwal (MemWal -> Walrus dependency). Registers a
 // deterministic LOCAL embedding handler so memory writes work without a second API key.
 
+import { setDefaultResultOrder } from "node:dns";
+import { existsSync, rmSync } from "node:fs";
+import { join } from "node:path";
+
 import { AgentRuntime, ModelType, stringToUuid } from "@elizaos/core";
 import type { IAgentRuntime, IDatabaseAdapter } from "@elizaos/core";
 import groqPlugin from "@elizaos/plugin-groq";
 import openaiPlugin from "@elizaos/plugin-openai";
 import sqlPlugin, { createDatabaseAdapter } from "@elizaos/plugin-sql";
+
+// Process-wide boot fixes (run once, on import — before any fetch or model call):
+// 1. Prefer IPv4 for "localhost". The gateway/intake bind 0.0.0.0 (IPv4 only), but Node may try
+//    IPv6 ::1 first and intermittently fail (ECONNREFUSED) — which makes the agent fall back to a
+//    STALE cached job menu instead of the fresh templates. ipv4first makes localhost -> 127.0.0.1
+//    reliably and faster (no IPv6 wait).
+// 2. Silence the AI SDK's per-call sampling-param warnings (the model ignores presence/frequency/
+//    stop penalties; the warnings are pure noise).
+setDefaultResultOrder("ipv4first");
+(globalThis as { AI_SDK_LOG_WARNINGS?: boolean }).AI_SDK_LOG_WARNINGS = false;
 
 import { walrusPluginWithSigner } from "./walrusPluginWithSigner.js";
 import { memwalPlugin } from "../../../plugins/plugin-memwal/src/index.js";
@@ -116,6 +130,27 @@ function extractEmbeddingText(params: unknown): string {
  * STRING under WALRUS_SIGNER_KEY and is normalized inside the Walrus service; it
  * is OPTIONAL (absent -> read-only Walrus) and is NEVER logged.
  */
+/**
+ * The embedded-PGlite data dir for ONE agent identity. PGlite is single-writer, so each agent gets
+ * its OWN dir under config.dbDir (keyed by agentId) — otherwise two agents (e.g. two example agents
+ * in two terminals) contend over one DB and the first query fails ("CREATE SCHEMA ... migrations").
+ * Also clears a stale lock: PGlite's embedded Postgres never outlives its node process, so a
+ * leftover postmaster.pid/opts at boot is always from a dead run (a crash / Ctrl-C) — removing it
+ * makes the next boot of this agent reliable instead of failing on a phantom lock.
+ */
+function resolveAgentDbDir(baseDir: string, agentId: string): string {
+  const dir = join(baseDir, agentId);
+  for (const lock of ["postmaster.pid", "postmaster.opts"]) {
+    try {
+      const lockPath = join(dir, lock);
+      if (existsSync(lockPath)) rmSync(lockPath, { force: true });
+    } catch {
+      // Best-effort: a permission/locked error here is non-fatal (the adapter init surfaces real problems).
+    }
+  }
+  return dir;
+}
+
 export async function createAgentRuntime(
   config: AgentConfig,
   character: AgentCharacter = DEFAULT_CHARACTER,
@@ -190,7 +225,15 @@ export async function createAgentRuntime(
   //   2. run plugin migrations to BUILD the schema (else core tables are missing).
   //      Schema-less plugins (walrus/memwal) no-op here.
   //   3. register the adapter, then initialize the runtime.
-  const adapter: IDatabaseAdapter = createDatabaseAdapter({ dataDir: config.dbDir }, agentId);
+  // Local DB: IN-MEMORY by default. The durable memory lives on Walrus (MemWal), so the local
+  // PGlite is just per-session scratch. In-memory writes NO files, so it CANNOT hit the recurring
+  // boot crash — PGlite is a WASM Postgres and a reused/locked/concurrently-written on-disk dir
+  // makes it abort ("RuntimeError: Aborted()") on the first query (CREATE SCHEMA). Set DB_DIR to a
+  // path ONLY if you want a persistent on-disk DB (then each agent gets its own subdir + a
+  // stale-lock cleanup); leaving it unset is the safe default.
+  const dbDirEnv = (process.env.DB_DIR ?? "").trim();
+  const dataDir = dbDirEnv.length > 0 ? resolveAgentDbDir(dbDirEnv, agentId) : "memory://";
+  const adapter: IDatabaseAdapter = createDatabaseAdapter({ dataDir }, agentId);
   await adapter.init();
   const schemaPlugins: SchemaPlugin[] = [
     sqlPlugin as unknown as SchemaPlugin,

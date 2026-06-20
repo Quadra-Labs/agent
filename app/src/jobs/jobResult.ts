@@ -12,6 +12,7 @@ import { SuiJsonRpcClient, getJsonRpcFullnodeUrl } from "@mysten/sui/jsonRpc";
 import { toHex } from "@mysten/bcs";
 
 import type { IntakeTemplate } from "../templates/intakeTemplate.js";
+import { parseDurationMs } from "../templates/intakeTemplate.js";
 
 // plugin-groq swallows API errors into this sentinel. Treat it as a hard failure so we
 // never encrypt a fake "result". Lifted from chat.ts / intakeNotification.ts.
@@ -368,6 +369,23 @@ export type ProduceAndSealResult =
  * so the agent only needs the ciphertext to register via dataGatewayClient. Reuses
  * produceResult + sealEncryptResult; NEVER throws, NEVER logs the result/key bytes.
  */
+// Evaluators that need a unix-seconds `target_ts` the user should NOT type by hand. For a paid job
+// we derive it from the on-chain paid time + the agreed lifetime (the LLM has no clock and would
+// guess "now"). Add other target-based prediction evaluators here as they appear.
+const TARGET_FROM_LIFETIME_EVALUATORS = new Set<string>(["polymarket-price"]);
+
+/**
+ * Deterministically derive a prediction job's `target_ts` (unix SECONDS) from the on-chain paid
+ * time + the agreed lifetime, minus a small buffer so the moment is safely in the past by the time
+ * the scheduler scores at lifetime end. Pure; no clock read (uses the sealed `startedAtMs`).
+ */
+function deriveTargetTsSeconds(startedAtMs: number, lifetime: string): number | undefined {
+  const lifeMs = parseDurationMs(lifetime);
+  if (lifeMs === undefined || lifeMs <= 0) return undefined;
+  const bufferMs = Math.min(60_000, Math.floor(lifeMs / 10));
+  return Math.floor((startedAtMs + lifeMs - bufferMs) / 1000);
+}
+
 export async function produceAndSealResult(
   runtime: IAgentRuntime,
   input: SealResultInput,
@@ -380,6 +398,20 @@ export async function produceAndSealResult(
       message: "SEAL_PACKAGE_ID is not set; job result not encrypted",
       retryable: false,
     };
+  }
+
+  // The params the result is produced + sealed against. For a prediction-price job we derive the
+  // unix-seconds `target_ts` from the paid time + lifetime (so the user never types a timestamp and
+  // the model never guesses "now"). Done BEFORE produce so the forecast skill receives target_ts,
+  // and it flows into the sealed envelope params for the evaluator. A pre-filled target_ts (e.g. a
+  // competition binding) is kept as-is.
+  const collected: Record<string, string> = { ...input.collected };
+  if (
+    TARGET_FROM_LIFETIME_EVALUATORS.has(input.template.evaluator_id) &&
+    (collected.target_ts === undefined || collected.target_ts.trim().length === 0)
+  ) {
+    const ts = deriveTargetTsSeconds(input.startedAtMs, input.lifetime);
+    if (ts !== undefined) collected.target_ts = String(ts);
   }
 
   // Produce via the injected hook (e.g. the Pyth price-range skill) when present, else the
@@ -401,7 +433,7 @@ export async function produceAndSealResult(
     };
     const produced = await input.produce({
       template: input.template,
-      collected: input.collected,
+      collected,
       model,
     });
     if (!produced.ok) {
@@ -425,7 +457,7 @@ export async function produceAndSealResult(
     }
     result = validated.result;
   } else {
-    const produced = await produceResult(runtime, input.template, input.collected);
+    const produced = await produceResult(runtime, input.template, collected);
     if (!produced.ok) return produced;
     result = produced.result;
   }
@@ -455,7 +487,7 @@ export async function produceAndSealResult(
     // (market_id / target_ts) are the ONLY carrier of the evaluator's ground-truth inputs into the
     // scheduler, which scores by decrypting this envelope. Sealed for every job; only prediction
     // scoring reads them (scheduler buildPayload gates on category === "prediction").
-    params: { ...input.collected },
+    params: { ...collected },
     agent_result: result,
     finalized_result: {},
     score: 0,

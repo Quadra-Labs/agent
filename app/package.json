@@ -7,6 +7,7 @@
   "scripts": {
     "chat": "tsx src/runtime/cli.ts",
     "serve": "tsx src/runtime/serve.ts",
+    "tunnel": "tsx src/runtime/tunnel.ts",
     "typecheck": "tsc --noEmit",
     "seed:template": "tsx src/templates/seedTemplate.ts",
     "register": "tsx src/runtime/registerAgent.ts",
@@ -23,7 +24,8 @@
     "@mysten/walrus": "1.1.7",
     "@sui-walrus/plugin-memwal": "file:../plugins/plugin-memwal",
     "@sui-walrus/plugin-walrus": "file:../plugins/plugin-walrus",
-    "socket.io-client": "^4.8.1"
+    "socket.io-client": "^4.8.1",
+    "tree-kill": "^1.2.2"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
