@@ -10,7 +10,7 @@
 import type { IAgentRuntime } from "@elizaos/core";
 
 import type { AgentCharacter } from "../character/character.js";
-import { fetchJobTemplates } from "./templatesReader.js";
+import { fetchJobTemplates, type FetchTemplatesResult } from "./templatesReader.js";
 import {
   parseIntakeTemplates,
   renderIntakeTemplatesForPrompt,
@@ -104,6 +104,30 @@ function intakeToMenuTemplate(t: IntakeTemplate): MenuTemplate {
   };
 }
 
+// Boot-time template fetch with bounded retries on a TRANSIENT network_error. The remote data
+// gateway does a Walrus-backed read for /templates that routinely takes ~10s and can spike past the
+// timeout on a cold start (e.g. the agent booting right after the engines come up), which surfaces
+// as a single network_error. Without a retry that one blip leaves the whole session with no menu
+// ("offering no jobs") and, on a first run, no cache to fall back to. Only network_error is
+// retried (it is the sole retryable kind); an unexpected_status (4xx/5xx) or invalid_body will not
+// fix itself, so those return immediately. A genuinely-down gateway fails fast (connection refused)
+// so the retries add little; a slow one gets the extra chances it needs.
+const TEMPLATE_FETCH_ATTEMPTS = 3;
+const TEMPLATE_FETCH_BACKOFF_MS = 2_000;
+
+async function fetchTemplatesWithRetry(dataGatewayUrl: string): Promise<FetchTemplatesResult> {
+  let last = await fetchJobTemplates(dataGatewayUrl);
+  for (
+    let attempt = 1;
+    attempt < TEMPLATE_FETCH_ATTEMPTS && !last.ok && last.kind === "network_error";
+    attempt++
+  ) {
+    await new Promise((resolve) => setTimeout(resolve, TEMPLATE_FETCH_BACKOFF_MS * attempt));
+    last = await fetchJobTemplates(dataGatewayUrl);
+  }
+  return last;
+}
+
 /**
  * Resolve the agent's offerable menu for this session. NEVER throws.
  */
@@ -113,8 +137,9 @@ export async function resolveMenu(input: ResolveMenuInput): Promise<ResolvedMenu
   const notes: string[] = [];
   const store = resolveMenuStore(runtime);
 
-  // 1. Fetch the source doc. An outage falls back to the last good cached menu.
-  const fetched = await fetchJobTemplates(dataGatewayUrl);
+  // 1. Fetch the source doc (retrying a transient network_error). An outage that survives the
+  //    retries falls back to the last good cached menu.
+  const fetched = await fetchTemplatesWithRetry(dataGatewayUrl);
   if (!fetched.ok) {
     if (store !== undefined) {
       const cached = await store.readLatestMenu(agent);
