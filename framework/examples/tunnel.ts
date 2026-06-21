@@ -76,12 +76,20 @@ async function main(): Promise<void> {
   const provider = parseProvider(argv);
 
   console.log(`Opening a ${provider} tunnel to http://localhost:${port} ...`);
+  // The tunnel binaries are very chatty (cloudflared prints dozens of INF lines per boot). They
+  // are noise during normal use — the public URL is captured and printed separately below — so
+  // forward them only when DEBUG is on in app/.env (DEBUG=1/true). The URL capture inside
+  // startCloudflared is independent of this callback, so muting it never breaks URL detection.
+  const debugLogs = ["1", "true", "yes"].includes((process.env.DEBUG ?? "").trim().toLowerCase());
+  const tunnelLog = (tag: string) => (l: string): void => {
+    if (debugLogs && l.trim()) console.log(`[${tag}] ${l}`);
+  };
   let handle: TunnelHandle;
   try {
     handle =
       provider === "ngrok"
-        ? await startNgrok({ port, onLog: (l) => l.trim() && console.log(`[ngrok] ${l}`) })
-        : await startCloudflared({ port, onLog: (l) => l.trim() && console.log(`[cloudflared] ${l}`) });
+        ? await startNgrok({ port, onLog: tunnelLog("ngrok") })
+        : await startCloudflared({ port, onLog: tunnelLog("cloudflared") });
   } catch (err) {
     if (err instanceof MissingBinaryError) {
       console.error(`\n${err.bin} is not installed or not on your PATH.\n`);

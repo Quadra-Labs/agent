@@ -149,8 +149,15 @@ async function waitForPing(publicUrl: string, timeoutMs = 40_000, intervalMs = 1
   return false;
 }
 
+// The tunnel binaries (cloudflared especially) print dozens of INF lines per boot — noise during
+// normal use, since the public URL is captured and printed separately. Forward them only when
+// DEBUG is on in app/.env (DEBUG=1/true). URL capture is independent of this callback.
+function tunnelDebugEnabled(): boolean {
+  return ["1", "true", "yes"].includes((process.env.DEBUG ?? "").trim().toLowerCase());
+}
+
 function logChild(name: string, line: string): void {
-  if (line.trim().length > 0) console.log(`[${name}] ${line}`);
+  if (tunnelDebugEnabled() && line.trim().length > 0) console.log(`[${name}] ${line}`);
 }
 
 async function main(): Promise<void> {

@@ -195,8 +195,13 @@ export class WalrusService extends Service {
         sizeBytes: bytes.length,
       };
     } catch (err) {
-      // Classifiable network failure -> typed result; everything else
-      // (blob_unavailable is not a store outcome; unclassifiable) -> throw loudly.
+      // store() NEVER throws: every caller (MemWal writeCheckpoint/writeMenu/writeDraft, all
+      // documented "NEVER throws") asserts on `kind` and a throw here propagates uncaught — a
+      // single Walrus write hiccup (e.g. insufficient WAL/SUI for the upload-relay tip, a relay
+      // 5xx, a certification timeout) would otherwise 500 the agent's whole chat turn. A
+      // classifiable transient is a retryable network_error; anything else is a non-retryable
+      // config_error RESULT carrying the detail, so the caller can degrade (the MemWal draft is
+      // best-effort) instead of crashing.
       const classified = classifyWalrusError(err);
       if (classified.kind === "network_error") {
         return {
@@ -207,7 +212,13 @@ export class WalrusService extends Service {
           retryable: true,
         };
       }
-      throw err;
+      return {
+        ok: false,
+        kind: "config_error",
+        errorName: classified.errorName,
+        message: classified.message,
+        retryable: false,
+      };
     }
   }
 

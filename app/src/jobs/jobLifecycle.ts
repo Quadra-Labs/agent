@@ -508,14 +508,24 @@ export async function advanceJobLifecycle(
   const { state, templates } = input;
   if (templates.length === 0) return { state, notes: [] };
 
-  switch (state.phase) {
-    case "idle":
-      return handleIdle(input);
-    case "submitted":
-      return handleSubmitted(input);
-    case "delivering":
-    case "done":
-    default:
-      return { state, notes: [] };
+  // "NEVER throws" is a hard contract: the HTTP /chat handler runs this inside the same try as
+  // respond(), so ANY escape here loses the user's reply and 500s the whole turn. The phase
+  // handlers go through clients that are individually no-throw, but a best-effort dependency
+  // (e.g. a MemWal/Walrus write that fails in an unforeseen way, or the model client) must never
+  // be able to crash a chat turn. Catch as the last line of defense: keep the state unchanged so
+  // the next turn retries, and surface nothing to the user (the reply still lands).
+  try {
+    switch (state.phase) {
+      case "idle":
+        return await handleIdle(input);
+      case "submitted":
+        return await handleSubmitted(input);
+      case "delivering":
+      case "done":
+      default:
+        return { state, notes: [] };
+    }
+  } catch {
+    return { state, notes: [] };
   }
 }

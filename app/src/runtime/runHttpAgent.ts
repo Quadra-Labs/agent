@@ -197,7 +197,26 @@ export async function runHttpAgent(opts: RunHttpAgentOptions): Promise<void> {
         const conv = [...conversations.values()].find(
           (c) => c.jobState.session?.job_id === event.job_id,
         );
-        if (conv) void serialize(() => stepLifecycle(conv));
+        if (!conv) {
+          // The payment landed but no live conversation owns this job (e.g. the agent restarted
+          // after the user paid). Without a conv there is nothing to produce from — surface it
+          // instead of silently letting the job refund at the deadline.
+          console.warn(`[socket] job_paid ${event.job_id} but no live conversation owns it — cannot produce/deliver.`);
+          return;
+        }
+        // This is the payment-first PRODUCE trigger. Its notes (produce/seal/register outcome) are
+        // the ONLY record of whether the paid job was fulfilled — the chat turn that paid is long
+        // over — so LOG them here instead of discarding. A silent failure here is exactly what
+        // looks like "paid but refunded non-delivered" from the intake side.
+        void serialize(async () => {
+          try {
+            const notes = await stepLifecycle(conv);
+            for (const n of notes) console.log(`[job ${event.job_id}] ${n}`);
+            console.log(`[job ${event.job_id}] phase=${conv.jobState.phase}`);
+          } catch (err) {
+            console.error(`[job ${event.job_id}] produce/deliver step failed: ${errorDetail(err)}`);
+          }
+        });
       },
     });
   }
@@ -275,7 +294,16 @@ export async function runHttpAgent(opts: RunHttpAgentOptions): Promise<void> {
               ...(templatesText !== undefined ? { templatesText } : {}),
               ...(character.systemPrompt !== undefined ? { systemPrompt: character.systemPrompt } : {}),
             });
-            const notes = await stepLifecycle(conv);
+            // The job step is best-effort: it must NEVER cost the user the reply respond() just
+            // produced. advanceJobLifecycle is no-throw by contract, but guard the whole step
+            // (listTurns, payment fold, delivery-poll start) so any unforeseen escape degrades to
+            // "reply only, retry the job next turn" instead of a 500 that drops the conversation.
+            let notes: string[] = [];
+            try {
+              notes = await stepLifecycle(conv);
+            } catch (stepErr) {
+              console.error(`(job step failed, reply preserved: ${errorDetail(stepErr)})`);
+            }
             return { reply, notes, job: jobPayload(conv.jobState) };
           });
           send(res, 200, { ok: true, ...result });
