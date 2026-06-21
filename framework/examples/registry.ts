@@ -13,6 +13,8 @@ import type { AgentCharacter } from "../../app/src/character/character.js";
 import type { ProduceHook } from "../../app/src/jobs/jobResult.js";
 
 import { priceRangeAgent } from "./priceRangeAgent.js";
+import { ethPriceBandAgent } from "./ethPriceBandAgent.js";
+import { solPriceBandAgent } from "./solPriceBandAgent.js";
 import { polymarketPriceAgent } from "./polymarketPriceAgent.js";
 import { polymarketResolutionAgent } from "./polymarketResolutionAgent.js";
 import { polymarketEventAgent } from "./polymarketEventAgent.js";
@@ -30,6 +32,14 @@ export const EXAMPLE_AGENTS: Readonly<Record<string, ExampleEntry>> = {
   "price-range": {
     character: priceRangeAgent.character,
     produce: makeSkillProducer(priceRangeAgent.skills),
+  },
+  "eth-price-band": {
+    character: ethPriceBandAgent.character,
+    produce: makeSkillProducer(ethPriceBandAgent.skills),
+  },
+  "sol-price-band": {
+    character: solPriceBandAgent.character,
+    produce: makeSkillProducer(solPriceBandAgent.skills),
   },
   "poly-price": {
     character: polymarketPriceAgent.character,
