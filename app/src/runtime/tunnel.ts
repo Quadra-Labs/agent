@@ -14,6 +14,7 @@
 // The agent's connections to the engines (intake/competition sockets, data gateway) are
 // OUTBOUND and need no public URL — only the inbound /ping + /chat path does.
 
+import "./httpDispatcher.js"; // keep-alive: reuse connections across calls (must precede any fetch)
 import { spawn } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";

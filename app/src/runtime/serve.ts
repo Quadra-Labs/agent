@@ -3,6 +3,7 @@
 // cli.ts (the interactive REPL) but serves /ping + /chat over HTTP instead of stdin. Run:
 //   npm run serve -- --character example   (set AGENT_PUBLIC_URL so the web can discover it)
 
+import "./httpDispatcher.js"; // keep-alive: reuse connections across calls (must precede any fetch)
 import { runHttpAgent } from "./runHttpAgent.js";
 import { errorDetail } from "./runInteractiveAgent.js";
 import {

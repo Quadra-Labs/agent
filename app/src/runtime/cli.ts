@@ -3,6 +3,7 @@
 // logic lives in runInteractiveAgent so the framework example runner can reuse it with a custom
 // result producer. Secrets are never printed.
 
+import "./httpDispatcher.js"; // keep-alive: reuse connections across calls (must precede any fetch)
 import { runInteractiveAgent, errorDetail } from "./runInteractiveAgent.js";
 import {
   DEFAULT_CHARACTER,
