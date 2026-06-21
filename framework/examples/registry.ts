@@ -15,6 +15,7 @@ import type { ProduceHook } from "../../app/src/jobs/jobResult.js";
 import { priceRangeAgent } from "./priceRangeAgent.js";
 import { ethPriceBandAgent } from "./ethPriceBandAgent.js";
 import { solPriceBandAgent } from "./solPriceBandAgent.js";
+import { btcUpDownAgent } from "./btcUpDownAgent.js";
 import { polymarketPriceAgent } from "./polymarketPriceAgent.js";
 import { polymarketResolutionAgent } from "./polymarketResolutionAgent.js";
 import { polymarketEventAgent } from "./polymarketEventAgent.js";
@@ -40,6 +41,10 @@ export const EXAMPLE_AGENTS: Readonly<Record<string, ExampleEntry>> = {
   "sol-price-band": {
     character: solPriceBandAgent.character,
     produce: makeSkillProducer(solPriceBandAgent.skills),
+  },
+  "btc-up-down": {
+    character: btcUpDownAgent.character,
+    produce: makeSkillProducer(btcUpDownAgent.skills),
   },
   "poly-price": {
     character: polymarketPriceAgent.character,
