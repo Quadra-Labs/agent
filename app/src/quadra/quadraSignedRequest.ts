@@ -12,7 +12,10 @@
 
 import type { Signer } from "@mysten/sui/cryptography";
 
-const DEFAULT_TIMEOUT_MS = 10_000;
+// 30s, not 10s: the live data gateway resolves/writes Walrus-backed pointers (and intake
+// validates jobs against them), so POST /jobs and POST /agent-endpoints routinely take >10s on a
+// remote deployment. deliverJob (90s) and registerSealedResult (180s) override this explicitly.
+const DEFAULT_TIMEOUT_MS = 30_000;
 
 export interface QuadraSignedRequestInput {
   /** The agent signer (an Ed25519 keypair from normalizeWalrusSigner). */

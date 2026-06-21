@@ -35,6 +35,10 @@ import { saveJobDraft, loadJobDraft } from "./jobDraft.js";
 // plugin-groq returns this sentinel instead of throwing; treat it as a non-commitment.
 const GROQ_ERROR_SENTINEL = "Error generating text. Please try again later.";
 
+// QUADRA has 6 decimals: 1 QUADRA = 1_000_000 base units. The agent quotes a price in whole
+// QUADRA; the on-chain pay_for_job takes a Coin<QUADRA> whose u64 value is in base units.
+const QUADRA_BASE_UNITS = 1_000_000;
+
 // idle -> submitted -> delivering -> done. The turn-driven coordinator owns idle +
 // submitted; once the result is registered (delivering), the background deliveryPoll
 // owns the job and the coordinator no-ops until it is done.
@@ -120,7 +124,8 @@ async function withRetry<T extends { ok: boolean }>(
 export interface AcceptanceDecision {
   /** The accepted template's category_id, or null if the agent has not accepted one. */
   readonly templateId: string | null;
-  /** The cost (base units) the agent quoted, or null if none stated yet. */
+  /** The quoted cost in QUADRA base units (converted from the whole-QUADRA price the agent
+   * stated), or null if none stated yet. 1 QUADRA = 1_000_000 base units. */
   readonly cost: number | null;
   /** The asset/market the job targets (e.g. "BTC"), or null if none stated. The intake
    * engine requires it and validates it against the template's allowed assets. */
@@ -154,7 +159,8 @@ function buildAcceptancePrompt(templates: readonly IntakeTemplate[], transcript:
     "job needs only a price (set asset and lifetime to null for it). The agent has the final say",
     "and may decline. Output ONLY a single JSON object:",
     '  { "accepted_template_id": "<id>", "cost": <number>, "asset": "<SYMBOL>", "lifetime": "<dur>" }',
-    "      using one of the exact ids, the numeric price the agent quoted, the asset symbol",
+    "      using one of the exact ids, the price in QUADRA the agent quoted (a number of QUADRA",
+    "      tokens, e.g. 10 for 10 QUADRA; fractions allowed -- NOT base units), the asset symbol",
     '      (uppercase, e.g. BTC), and the lifetime as a duration string ("30s"/"5m"/"2h"/"1d"); use',
     '      null for asset/lifetime on a scoreless job, OR',
     '  { "accepted_template_id": null, "cost": null, "asset": null, "lifetime": null }  if the',
@@ -202,9 +208,14 @@ async function classifyAcceptance(
   const asset = (parsed as { asset?: unknown }).asset;
   const lifetime = (parsed as { lifetime?: unknown }).lifetime;
   const templateId = typeof id === "string" && templates.some((t) => t.id === id) ? id : null;
-  // Base-unit costs are integers (the on-chain pay_for_job takes a u64); round a quoted
-  // value and require it positive.
-  const validCost = typeof cost === "number" && Number.isFinite(cost) && cost > 0 ? Math.round(cost) : null;
+  // The agent quotes the price in whole QUADRA (e.g. 10 = 10 QUADRA); convert to base units for
+  // the on-chain pay_for_job, which takes a Coin<QUADRA> whose u64 value is in base units
+  // (QUADRA has 6 decimals, so 1 QUADRA = 1_000_000 base units). Without this, a "10 QUADRA"
+  // quote was charged as 10 base units = 0.00001 QUADRA.
+  const validCost =
+    typeof cost === "number" && Number.isFinite(cost) && cost > 0
+      ? Math.round(cost * QUADRA_BASE_UNITS)
+      : null;
   // Constrain the asset to the chosen template's allowed list (the intake engine requires it):
   // a value outside the list yields null, so the agent keeps clarifying instead of submitting a
   // doomed request. With no declared list, the symbol passes through uppercased.
