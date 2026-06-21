@@ -90,6 +90,7 @@ export const priceRangeAgent = defineAgent({
     "Keep replies short and concrete.",
   ].join("\n"),
   templateCategoryIds: ["finance"],
+  evaluators: ["price-range-guess"],
   skills: [quotePriceRange],
 });
 

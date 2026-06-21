@@ -58,6 +58,7 @@ export const polymarketEventAgent = defineAgent({
     "Keep replies short and concrete.",
   ].join("\n"),
   templateCategoryIds: ["prediction"],
+  evaluators: ["polymarket-event"],
   skills: [guessEvent],
 });
 

@@ -62,14 +62,17 @@ const ASK_FOR_MISSING = [
   "still missing, one or two at a time, until you can complete it.",
 ].join(" ");
 
-// When every parameter is collected, summarize in plain language and stop.
+// When every parameter is collected: summarize, quote the price, and hand off to the REAL
+// payment-first lifecycle. This is NOT a demo — the system opens a real job and produces the
+// result from live data AFTER payment, so the agent must never fake progress or invent a value.
 const SUMMARY = [
   "When you have every parameter, give a short plain-language summary of the job",
-  "(what asset or market, what you will predict or resolve, and the time window),",
-  "then say that in the full system this would now be handed to the Intake Engine",
-  "for pricing and the user's cost approval, and that this demo stops there -- no",
-  "live market or oracle data is fetched. Do NOT invent a prediction, price, or",
-  "outcome value yourself.",
+  "(what asset or market, what you will predict or resolve, and the time window) and",
+  "state the price. The job is then opened and the user must PAY to start it; the result",
+  "is produced from live market/oracle data ONLY AFTER their payment confirms.",
+  "Do NOT claim the job is paid, started, running, or in progress; do NOT say you are",
+  "gathering, fetching, computing, or producing the result; and do NOT invent a prediction,",
+  "price, band, or outcome yourself. After accepting, tell the user to pay to start, then wait.",
 ].join(" ");
 
 // The non-negotiable leak guard: no JSON, no field/param names, never "template".

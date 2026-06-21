@@ -171,9 +171,20 @@ async function selectOne(
  */
 export async function selfSelectTemplates(input: SelfSelectInput): Promise<SelfSelectResult> {
   const threshold = input.threshold ?? DEFAULT_CONFIDENCE_THRESHOLD;
+  const families = input.character.capabilities?.evaluatorFamilies;
   const selections: TemplateSelection[] = [];
   for (const template of input.candidates) {
-    const decision = await selectOne(input.runtime, input.character, template);
+    // An agent that EXPLICITLY declared it serves this evaluator (the `evaluators` binding) offers
+    // the matching template DETERMINISTICALLY: the declaration is authoritative, so skip the fragile
+    // per-template LLM self-selection (which defaults to REJECT on any non-JSON / low-confidence
+    // model output). Discovery agents (no evaluator binding) still let the model decide.
+    const bound =
+      families !== undefined &&
+      template.evaluator_id.length > 0 &&
+      families.some((f) => template.evaluator_id === f || template.evaluator_id.startsWith(f));
+    const decision = bound
+      ? { decision: "accept" as const, reason: "declared evaluator binding", confidence: 1 }
+      : await selectOne(input.runtime, input.character, template);
     selections.push({ template, ...decision });
   }
   // Offerable = accepted AND confident enough. needs_more_info / low-confidence are excluded.

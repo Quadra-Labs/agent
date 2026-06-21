@@ -53,6 +53,7 @@ export const polymarketResolutionAgent = defineAgent({
     "Keep replies short and concrete.",
   ].join("\n"),
   templateCategoryIds: ["prediction"],
+  evaluators: ["polymarket-resolution"],
   skills: [guessResolution],
 });
 

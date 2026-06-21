@@ -124,6 +124,7 @@ export const ethPriceBandAgent = defineAgent({
     "Keep replies short and concrete.",
   ].join("\n"),
   templateCategoryIds: ["finance"],
+  evaluators: ["price-range-guess"],
   skills: [quoteEthBand],
 });
 

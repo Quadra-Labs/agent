@@ -65,6 +65,7 @@ export const polymarketPriceAgent = defineAgent({
     "  simulate anything. Keep replies short and concrete.",
   ].join("\n"),
   templateCategoryIds: ["prediction"],
+  evaluators: ["polymarket-price"],
   skills: [forecastPrice],
 });
 
