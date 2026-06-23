@@ -68,9 +68,13 @@ async function waitForPing(publicUrl: string, timeoutMs = 40_000, intervalMs = 1
 }
 
 async function main(): Promise<void> {
-  loadAppEnv();
   const argv = process.argv.slice(2);
-  const entry = resolveExample(parseAgentName(argv));
+  const agentName = parseAgentName(argv);
+  // Load env BEFORE resolving the agent: the per-agent override file (app/.env.<name>) carries this
+  // agent's own signer + port, the shared app/.env carries the model key + service URLs. Without
+  // the name the per-agent WALRUS_SIGNER_KEY / AGENT_PORT never load (empty signer, port clash).
+  loadAppEnv(agentName);
+  const entry = resolveExample(agentName);
   const config = loadAgentConfig();
   const port = parsePort(argv) ?? config.agentPort;
   const provider = parseProvider(argv);

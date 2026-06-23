@@ -14,8 +14,11 @@ import { runHttpAgent } from "../../app/src/runtime/runHttpAgent.js";
 import { loadAppEnv, parseAgentName, resolveExample } from "./registry.js";
 
 async function main(): Promise<void> {
-  loadAppEnv();
-  const entry = resolveExample(parseAgentName(process.argv.slice(2)));
+  const agentName = parseAgentName(process.argv.slice(2));
+  // Load env BEFORE resolving the agent: the per-agent override file (app/.env.<name>) carries this
+  // agent's own signer + port, the shared app/.env carries the model key + service URLs.
+  loadAppEnv(agentName);
+  const entry = resolveExample(agentName);
   await runHttpAgent({
     character: entry.character,
     ...(entry.produce !== undefined ? { produce: entry.produce } : {}),

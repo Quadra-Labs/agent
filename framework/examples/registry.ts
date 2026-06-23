@@ -69,13 +69,23 @@ export function exampleNames(): string[] {
 }
 
 // Load the app's .env (these scripts run from agent/framework, so the app .env is two dirs up).
-export function loadAppEnv(): void {
+// When an agent name is given, a per-agent override file `app/.env.<name>` is loaded FIRST so its
+// keys win — Node's loadEnvFile keeps the first value set for a key. This lets several example
+// agents run side by side, each with its OWN funded signer (WALRUS_SIGNER_KEY) and AGENT_PORT in
+// its own file, while sharing the model key + service URLs from the base app/.env.
+export function loadAppEnv(agentName?: string): void {
   const loader = (process as { loadEnvFile?: (path?: string) => void }).loadEnvFile;
   if (typeof loader !== "function") return;
-  try {
-    loader(fileURLToPath(new URL("../../app/.env", import.meta.url)));
-  } catch {
-    // No .env — rely on whatever is already in the environment.
+  const relPaths =
+    agentName !== undefined && agentName !== ""
+      ? [`../../app/.env.${agentName}`, "../../app/.env"]
+      : ["../../app/.env"];
+  for (const rel of relPaths) {
+    try {
+      loader(fileURLToPath(new URL(rel, import.meta.url)));
+    } catch {
+      // Missing/unreadable file — fall through to the next file, then to the ambient environment.
+    }
   }
 }
 
